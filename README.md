@@ -1,46 +1,49 @@
-# Sunset Heat — Solmarina
+# gta6-01
 
-[![Play on make.fun](https://img.shields.io/badge/make.fun-Sunset_Heat-orange)](https://make.fun/c/gta6-01?ref=bh1grvtt)
-[![Competition: Make GTA 6](https://img.shields.io/badge/competition-gta6--01-blue)](https://make.fun/c/gta6-01?ref=bh1grvtt)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/aben00/gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/aben00/gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-An open-world crime game in the spirit of GTA 6, built for the
-[make.fun gta6-01 bounty](https://make.fun/c/gta6-01?ref=bh1grvtt).
-A coastal city at dusk, yours to steal, outrun and finish — all original:
-its city, characters, vehicles, names, story, art and sounds. No Rockstar
-names, assets or places anywhere in it.
+**Sunset Heat** is an open-world crime game built for the
+[make.fun gta6-01 bounty](https://make.fun/bounty/gta6-01): a coastal city
+at dusk, yours to steal, outrun and finish. Everything in it is original —
+the city, the characters, the vehicles, the names, the story, the art and
+the sounds. No Rockstar names, assets or places anywhere.
 
-## The game
+## What it is
 
-Solmarina is a sun-soaked grid city on the sea: drive the beach road at
-sunset, walk the sidewalks, steal cars, dodge the Solmarina PD, and run
-three jobs for Marco before the sun goes down.
+Solmarina is a grid city on the sea, one sunset away from dark. You arrive
+on foot with $50 and a phone call from Marco, who has three jobs for you.
+Drive the beach road, walk the sidewalks, take cars that are not yours,
+dodge the Solmarina PD, and find the cash the city hides.
 
-- **Open world on foot and by car** — WASD + mouse, third-person chase
-  camera, traffic that drives the grid and pedestrians on the sidewalks.
-- **Steal and drive** — parked cars are free; a traffic car or a taxi is
-  a crime, and the owner calls it in. Cars handle, brake and reverse, and
-  a hard crash bends them: top speed falls (a wreck does 69 km/h against
-  108 healthy), the exhaust smokes, and parking in the green safehouse
-  garage fixes it for free.
-- **Wanted level and police** — five stars, cruisers that chase and ram,
-  officers on foot who will grab you. Lose the heat and it fades.
-- **Three story missions** — First Wheels ($250), Sunset Run ($400, on a
-  90-second clock) and Heat Off ($750), with Marco's dialogue, for $1,450
-  in all. Then free roam.
-- **Eight hidden cash stashes** ($40–$75 each) — gold diamonds floating
-  over the spot, gold dots on the minimap, E to grab.
-- **Combat** — F or click to punch; a pedestrian goes down and the law
-  notices. Get caught with no health and it is a $120 fine and a wake-up
-  at the safehouse.
-- **Full HUD** — cash, wanted stars, health and car-condition bars, a
-  minimap (safehouse, stashes, objective, police), mission card with the
-  timer, context prompts ("E — Get in", "E — Steal this car ★",
-  "Repairing…"), and a horn (H) that scatters the crowd ahead.
-- **Polish** — sunset lighting, a wooden pier with five boats in the sea,
-  yellow taxis with roof signs, synthesised WebAudio (engine, sirens,
-  two-tone horn, clock ticks), auto-quality scaling for software
-  rendering, start / pause / busted screens, and a localStorage save.
+- **On foot and behind the wheel** — third-person chase camera, WASD plus
+  mouse look, traffic driving the grid and pedestrians on the sidewalks.
+- **Stealing** — a parked car is free. A traffic car or a taxi is a crime:
+  the owner calls it in and a wanted star follows. Cars accelerate, brake
+  and reverse, and a hard crash bends them: top speed falls (a wreck does
+  69 km/h against 108 healthy), the exhaust smokes, and parking in the
+  green safehouse garage fixes it for free.
+- **Heat** — five wanted stars. Cruisers chase and ram; once the heat is
+  high enough, officers run you down on foot and hold you until the bust.
+  Stay quiet and the stars fade, one every twenty seconds.
+- **Three jobs for Marco** — First Wheels ($250), Sunset Run ($400, on a
+  90-second clock) and Heat Off ($750), $1,450 in all, with Marco's
+  dialogue. Finish them and the city is yours to roam.
+- **Eight hidden stashes** — $40 to $75 each, marked by a floating gold
+  diamond and a gold dot on the minimap. Walk up and press E.
+- **A fight, if you want one** — F or click to punch. A pedestrian goes
+  down and the law notices. Run out of health and it is a $120 fine and a
+  wake-up at the safehouse.
+- **The whole HUD** — cash, wanted stars, health and car-condition bars,
+  a minimap (safehouse, stashes, objective, police), a mission card with
+  the timer, context prompts ("E — Get in", "E — Steal this car ★",
+  "Repairing…"), and a horn (H) that scatters the crowd ahead of you.
+- **The look and the sound** — sunset lighting, a wooden pier with five
+  boats in the sea, yellow taxis with roof signs, synthesised WebAudio
+  (engine, sirens, two-tone horn, clock ticks), auto-quality scaling for
+  software rendering, start / pause / busted screens, and a localStorage
+  save that survives a reload.
 
 ## Controls
 
@@ -57,14 +60,14 @@ three jobs for Marco before the sun goes down.
 | M | Mute |
 | Enter | Start / continue |
 
-## Play it
+## Run it
 
 ```sh
 node serve.ts
 # then open http://localhost:8080
 ```
 
-No build step, no network request: `game/index.html` opens in desktop
+No build step and no network request: `game/index.html` opens in desktop
 Chrome and plays from its own files, with three.js vendored under
 `game/vendor/`.
 
@@ -72,7 +75,7 @@ Chrome and plays from its own files, with three.js vendored under
 
 `shots.json` lists the four shots and the `?shot=` scene behind each
 (`cover`, `chase`, `mission`, `start`, all `&seed=7`): the red car running
-for the beach at 108 km/h, the foot chase with a cruiser behind, the
+for the beach at full speed, the foot chase with a cruiser behind, the
 punch beside the red car, and the title over the dusk skyline.
 
 ## Hand in
@@ -81,10 +84,10 @@ punch beside the red car, and the title over the dusk skyline.
 mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
 
-`main.ts` copies `game/` and `screenshots/` to `/output` and writes
+`main.ts` stages `game/` and `screenshots/` into `/output` and writes
 `/output/dossier.json` with the vendored make.fun library.
 
-## Layout
+## Files
 
 - `game/index.html` — page, HUD, overlays, import map
 - `game/src/main.js` — boot, fixed-step loop, screens

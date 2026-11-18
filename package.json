@@ -1,1 +1,10 @@
-{"description":"Sunset Heat — an open-world crime game in Solmarina, built for make.fun gta6-01","engines":{"node":">=22.18"},"license":"MIT","name":"sunset-heat","private":true,"scripts":{"serve":"node serve.ts","start":"node serve.ts","submit":"node main.ts"},"type":"module","version":"1.1.0"}
+{
+  "description":"Sunset Heat — an open-world crime game in Solmarina, built for make.fun gta6-01",
+  "engines":{"node":">=22.18"},
+  "license":"MIT",
+  "name":"sunset-heat",
+  "private":true,
+  "scripts":{"serve":"node serve.ts","start":"node serve.ts","submit":"node main.ts"},
+  "type":"module",
+  "version":"1.1.0"
+}

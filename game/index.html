@@ -5,43 +5,65 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sunset Heat — Solmarina</title>
 <style>
+  :root {
+    --gold: #ffd166;
+    --gold-soft: #ffb347;
+    --green: #7ee787;
+    --red: #ff6b6b;
+    --ink: #eef1f5;
+    --ink-dim: #aab;
+    --panel: rgba(12, 10, 24, 0.72);
+    --panel-line: rgba(255, 255, 255, 0.09);
+    --track: rgba(255, 255, 255, 0.14);
+    --blue: #4fa3ff;
+  }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #241543; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
   #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .panel { background: rgba(12, 10, 24, 0.72); border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 12px; color: #eef1f5; backdrop-filter: blur(3px); }
   #hud { position: fixed; inset: 0; pointer-events: none; }
+  .card { background: var(--panel); border: 1px solid var(--panel-line); border-radius: 12px; color: var(--ink); backdrop-filter: blur(3px); }
+
+  /* Top-left: cash, wanted stars, health and car condition. */
   #stats { position: absolute; top: 14px; left: 14px; padding: 12px 16px; min-width: 168px; }
-  #money { font-size: 28px; font-weight: 800; color: #7ee787; line-height: 1.1; }
-  #wanted-line { font-size: 15px; letter-spacing: 2px; color: #ff6b6b; font-weight: 700; margin-top: 2px; }
+  #money { font-size: 28px; font-weight: 800; color: var(--green); line-height: 1.1; }
+  #wanted-line { font-size: 15px; letter-spacing: 2px; color: var(--red); font-weight: 700; margin-top: 2px; }
   #stars { letter-spacing: 2px; }
-  .bar-label { font-size: 11px; letter-spacing: 2px; color: #aab; margin-top: 7px; }
-  .bar { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.14); margin-top: 3px; overflow: hidden; }
-  .bar > div { height: 100%; border-radius: 4px; background: #4fce62; width: 100%; }
-  #car-fill { background: #4fa3ff; }
+  .gauge-label { font-size: 11px; letter-spacing: 2px; color: var(--ink-dim); margin-top: 7px; }
+  .gauge { height: 8px; border-radius: 4px; background: var(--track); margin-top: 3px; overflow: hidden; }
+  .gauge > div { height: 100%; border-radius: 4px; background: #4fce62; width: 100%; }
+  #car-fill { background: var(--blue); }
+
+  /* Top-right: the minimap. Bottom-right: speed and the key hints. */
   #minimap-wrap { position: absolute; top: 14px; right: 14px; }
   #minimap { display: block; width: 190px; height: 190px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.14); }
+  #speed { position: absolute; right: 18px; bottom: 52px; font-size: 34px; font-weight: 800; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,0.6); }
+  #hint { position: absolute; right: 18px; bottom: 14px; font-size: 12.5px; color: rgba(238, 241, 245, 0.85); text-align: right; line-height: 1.5; text-shadow: 0 1px 4px rgba(0,0,0,0.7); }
+
+  /* Bottom-left: the current job and how many stashes are found. */
   #mission-card { position: absolute; left: 14px; bottom: 14px; padding: 12px 16px; max-width: 340px; }
-  #mission-objective { color: #ffd166; font-weight: 800; letter-spacing: 1px; font-size: 14px; }
+  #mission-objective { color: var(--gold); font-weight: 800; letter-spacing: 1px; font-size: 14px; }
   #mission-text { font-size: 17px; font-weight: 600; margin-top: 3px; }
-  #mission-timer { color: #ffd166; font-size: 22px; font-weight: 800; margin-top: 2px; }
-  #stash-count { color: #ffd166; font-size: 12px; font-weight: 800; letter-spacing: 1px; margin-top: 5px; }
+  #mission-timer { color: var(--gold); font-size: 22px; font-weight: 800; margin-top: 2px; }
+  #stash-count { color: var(--gold); font-size: 12px; font-weight: 800; letter-spacing: 1px; margin-top: 5px; }
+
+  /* Centre: Marco's line, the context prompt, and the banner. */
   #dialogue { position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%); padding: 12px 22px; max-width: 620px; text-align: left; }
   #dialogue-name { color: #ff9a5c; font-weight: 800; letter-spacing: 2px; font-size: 12px; }
   #dialogue-text { font-size: 17px; margin-top: 2px; }
-  #prompt { position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); padding: 8px 18px; font-size: 16px; font-weight: 700; color: #ffd166; white-space: nowrap; }
-  #banner { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); padding: 10px 22px; font-size: 19px; font-weight: 800; color: #ffd166; white-space: nowrap; }
-  #speed { position: absolute; right: 18px; bottom: 52px; font-size: 34px; font-weight: 800; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,0.6); }
-  #hint { position: absolute; right: 18px; bottom: 14px; font-size: 12.5px; color: rgba(238, 241, 245, 0.85); text-align: right; line-height: 1.5; text-shadow: 0 1px 4px rgba(0,0,0,0.7); }
-  .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #fff; background: rgba(20, 10, 40, 0.45); }
-  .screen h1 { font-size: 84px; letter-spacing: 6px; margin: 0; color: #ffb347; text-shadow: 0 4px 0 rgba(120, 50, 0, 0.55), 0 8px 32px rgba(0,0,0,0.6); }
-  .screen h2 { font-size: 30px; letter-spacing: 12px; margin: 6px 0 18px; color: #ffd166; }
-  .screen p { max-width: 620px; font-size: 17px; line-height: 1.55; color: #f2ead9; margin: 0 0 18px; }
+  #prompt { position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); padding: 8px 18px; font-size: 16px; font-weight: 700; color: var(--gold); white-space: nowrap; }
+  #banner { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); padding: 10px 22px; font-size: 19px; font-weight: 800; color: var(--gold); white-space: nowrap; }
+
+  /* Full-screen overlays: title, paused, busted. */
+  .screen-overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #fff; background: rgba(20, 10, 40, 0.45); }
+  .screen-overlay h1 { font-size: 84px; letter-spacing: 6px; margin: 0; color: var(--gold-soft); text-shadow: 0 4px 0 rgba(120, 50, 0, 0.55), 0 8px 32px rgba(0,0,0,0.6); }
+  .screen-overlay h2 { font-size: 30px; letter-spacing: 12px; margin: 6px 0 18px; color: var(--gold); }
+  .screen-overlay h3 { font-size: 52px; letter-spacing: 4px; margin: 0 0 10px; color: var(--red); text-shadow: 0 4px 24px rgba(0,0,0,0.7); }
+  .screen-overlay p { max-width: 620px; font-size: 17px; line-height: 1.55; color: #f2ead9; margin: 0 0 18px; }
   .controls { font-size: 15px; line-height: 1.9; color: #e8e2d2; margin-bottom: 26px; }
-  .controls b { color: #ffd166; }
-  #start-button { pointer-events: auto; cursor: pointer; font-size: 20px; font-weight: 800; letter-spacing: 2px; color: #231303; background: #ffd166; border: none; border-radius: 10px; padding: 14px 34px; box-shadow: 0 4px 0 #b98a1e; }
+  .controls b { color: var(--gold); }
+  #start-button { pointer-events: auto; cursor: pointer; font-size: 20px; font-weight: 800; letter-spacing: 2px; color: #231303; background: var(--gold); border: none; border-radius: 10px; padding: 14px 34px; box-shadow: 0 4px 0 #b98a1e; }
   #start-button:active { transform: translateY(3px); box-shadow: 0 1px 0 #b98a1e; }
-  .fine { font-size: 13px; color: rgba(240, 235, 220, 0.75); margin-top: 22px; }
-  .screen h3 { font-size: 52px; letter-spacing: 4px; margin: 0 0 10px; color: #ff6b6b; text-shadow: 0 4px 24px rgba(0,0,0,0.7); }
+  .fine-print { font-size: 13px; color: rgba(240, 235, 220, 0.75); margin-top: 22px; }
 </style>
 <script type="importmap">
 { "imports": { "three": "./vendor/three/three.module.min.js" } }
@@ -52,52 +74,52 @@
 <p id="status" role="status" aria-live="polite"></p>
 
 <div id="hud">
-  <div id="stats" class="panel">
+  <div id="stats" class="card">
     <div id="money">$50</div>
     <div id="wanted-line">WANTED <span id="stars">☆☆☆☆☆</span></div>
-    <div class="bar-label">HEALTH</div>
-    <div class="bar"><div id="health-fill"></div></div>
+    <div class="gauge-label">HEALTH</div>
+    <div class="gauge"><div id="health-fill"></div></div>
     <div id="car-row">
-      <div class="bar-label">CAR</div>
-      <div class="bar"><div id="car-fill"></div></div>
+      <div class="gauge-label">CAR</div>
+      <div class="gauge"><div id="car-fill"></div></div>
     </div>
   </div>
   <div id="minimap-wrap"><canvas id="minimap" width="190" height="190"></canvas></div>
-  <div id="mission-card" class="panel">
+  <div id="mission-card" class="card">
     <span id="mission-num" hidden>1</span>
     <div id="mission-objective">1 · First Wheels</div>
     <div id="mission-text">Steal a car — walk up to one and press E</div>
     <div id="mission-timer"></div>
     <div id="stash-count">STASHES 0/8</div>
   </div>
-  <div id="dialogue" class="panel">
+  <div id="dialogue" class="card">
     <div id="dialogue-name">MARCO</div>
     <div id="dialogue-text">MARCO: Solmarina, kid. The city runs on borrowed cars.</div>
   </div>
-  <div id="prompt" class="panel"></div>
-  <div id="banner" class="panel"></div>
+  <div id="prompt" class="card"></div>
+  <div id="banner" class="card"></div>
   <div id="speed"></div>
   <div id="hint">WASD move · E enter car · F punch · H horn · Shift run<br>Drag mouse to look · P pause · M mute</div>
 </div>
 
-<div id="screen-title" class="screen">
+<div id="screen-title" class="screen-overlay">
   <h1>SUNSET HEAT</h1>
   <h2>SOLMARINA</h2>
-  <p>An open-world crime story in a coastal city at dusk. Steal cars, outrun the Solmarina PD, and run three jobs for Marco — before the sun goes down. Eight cash stashes are hidden around the city; the safehouse garage fixes a bent car for free.</p>
+  <p>One coastal city at dusk, three jobs for Marco, and a sun that is already going down. Take cars that are not yours, keep the Solmarina PD off your tail, and pocket the cash the city hides — a bent car gets fixed free at the safehouse garage.</p>
   <div class="controls">
     <b>WASD</b> move / drive &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>E</b> enter / steal car / grab stash<br>
     <b>F</b> / click punch &nbsp;·&nbsp; <b>H</b> horn &nbsp;·&nbsp; <b>Shift</b> run &nbsp;·&nbsp; <b>Space</b> brake &nbsp;·&nbsp; <b>P</b> pause &nbsp;·&nbsp; <b>M</b> mute
   </div>
   <button id="start-button">START ENGINE</button>
-  <div class="fine">Original game. No Rockstar assets, names or places. Progress saves in this browser.</div>
+  <div class="fine-print">Original game. No Rockstar assets, names or places. Progress saves in this browser.</div>
 </div>
 
-<div id="screen-paused" class="screen" style="display: none">
+<div id="screen-paused" class="screen-overlay" style="display: none">
   <h3>PAUSED</h3>
   <p>Press P or Enter to keep driving.</p>
 </div>
 
-<div id="screen-busted" class="screen" style="display: none">
+<div id="screen-busted" class="screen-overlay" style="display: none">
   <h3>BUSTED</h3>
   <p>The Solmarina PD caught up with you. $120 fine — you wake up at the safehouse.</p>
   <p>Press Enter to get back out there.</p>

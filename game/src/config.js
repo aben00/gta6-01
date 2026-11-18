@@ -1,29 +1,52 @@
 // Sunset Heat — every tuning number, place and payout in one place.
-// The city is a street grid on the coast of Solmarina: x runs east, z runs
-// north toward the beach and the sea. Streets sit on multiples of 60 m;
-// the blocks between them hold the buildings. All speeds are m/s unless
-// a name says km/h, and all money is in dollars.
-
-export const SAVE_KEY = 'sunset-heat.save.v1';
-
-/** The playable rectangle: x in [-280, 280], z in [-280, 340]. */
-export const WORLD = { minX: -280, maxX: 280, minZ: -280, maxZ: 340 };
-/** Streets are laid out on this spacing; intersections are multiples of it. */
-export const STREET_STEP = 60;
-export const STREET_HALF = 6;
-/** North of this line the sand starts; past SEA_Z the water starts. */
-export const BEACH_Z = 240;
-export const SEA_Z = 282;
+//
+// Solmarina is a street grid on the coast: x runs east, z runs north
+// toward the beach and the sea. Streets sit on multiples of 60 m; the
+// blocks between them hold the buildings. Speeds are m/s unless a name
+// says km/h, money is dollars, and a heading of 0 faces north (+z) with
+// forward = (sin(yaw), cos(yaw)).
 
 /** Fixed step the simulation advances in, whatever the display rate. */
 export const STEP = 1 / 60;
+/** Seed used when the page carries no ?seed= value. */
+export const DEFAULT_SEED = 7;
+/** localStorage key for the save. */
+export const SAVE_KEY = 'sunset-heat.save.v1';
 
+/** The playable rectangle and the shoreline. */
+export const ISLAND = {
+  west: -280,
+  east: 280,
+  south: -280,
+  north: 340,
+  /** Sand starts north of this line; water starts past waterAt. */
+  sandAt: 240,
+  waterAt: 282,
+};
+
+/** Streets: spacing, half-width, and the range their lines cover. */
+export const STREETS = {
+  every: 60,
+  halfWidth: 6,
+  from: -240,
+  to: 240,
+};
+
+/** Where the player wakes up, on the street outside the safehouse. */
 export const SPAWN = { x: 0, z: -6, yaw: 0 };
 
-export const WALK = { speed: 4.6, runSpeed: 7.6, radius: 0.55 };
-export const CAR = {
+/** On-foot movement. */
+export const ON_FOOT = {
+  walk: 4.6,
+  run: 7.6,
+  radius: 0.55,
+};
+
+/** Cars: arcade handling, damage and the safehouse repair. */
+export const DRIVING = {
   topKmh: 108,
   topSpeed: 30,
+  /** Exponential approach to the top speed, per second. */
   accelRate: 1.15,
   brake: 26,
   reverseSpeed: 6,
@@ -31,31 +54,54 @@ export const CAR = {
   radius: 1.7,
   /** How much of the top speed damage eats: top * (1 - 0.45 * dmg). */
   damageLoss: 0.45,
+  /** Exhaust smoke starts past this damage. */
   smokeFrom: 0.35,
   repairRate: 0.3,
   repairRadius: 14,
 };
 
-export const TRAFFIC = { count: 14, cruise: 9.5, turnChance: 0.4, taxiChance: 0.25 };
-export const PARKED = { count: 8 };
-export const PEDS = { count: 18, walkMin: 1.1, walkMax: 1.9, fleeSpeed: 4.2, downSeconds: 6 };
-export const COPS = { maxCruisers: 4, cruise: 14, ramDamage: 0.12, spawnDistance: 46 };
-export const OFFICERS = { runSpeed: 5.3, grabSeconds: 1.2, spawnDistance: 30 };
+/** Traffic and pedestrians: counts, speeds, colours are drawn from the seed. */
+export const CROWD = {
+  trafficCars: 14,
+  trafficCruise: 9.5,
+  turnChance: 0.4,
+  taxiChance: 0.25,
+  parkedCars: 8,
+  peds: 18,
+  pedWalkMin: 1.1,
+  pedWalkMax: 1.9,
+  pedFlee: 4.2,
+  pedDownSeconds: 6,
+};
 
-/** A star of wanted fades after this long with no fresh crime. */
-export const WANTED_DECAY_SECONDS = 20;
-export const MAX_WANTED = 5;
-export const BUST_FINE = 120;
+/** Police: cruiser and officer numbers and behaviour. */
+export const POLICE = {
+  maxCruisers: 4,
+  cruiserSpeed: 14,
+  ramDamage: 0.12,
+  cruiserSpawn: 46,
+  officerRun: 5.3,
+  grabSeconds: 1.2,
+  officerSpawn: 30,
+};
 
-/** Where the story happens. */
-export const MARINA = { x: -150, z: 150 };
-export const PIER = { x: 150, z: 210 };
-export const SAFEHOUSE = { x: -30, z: -150 };
-/** How close the player must be to count as "there". */
-export const MARKER_RADIUS = 8;
+/** Wanted: five stars at most, one fading per quiet stretch. */
+export const HEAT = {
+  maxStars: 5,
+  decaySeconds: 20,
+  bustFine: 120,
+};
 
-/** The three jobs, in order. A job is done when its stage list runs out. */
-export const MISSIONS = [
+/** Where the story happens, and how close counts as "there". */
+export const PLACES = {
+  marina: { x: -150, z: 150 },
+  pier: { x: 150, z: 210 },
+  safehouse: { x: -30, z: -150 },
+  markerRadius: 8,
+};
+
+/** The three jobs, in order. A job is done when its stages run out. */
+export const JOBS = [
   {
     name: 'First Wheels',
     reward: 250,
@@ -78,7 +124,7 @@ export const MISSIONS = [
 ];
 
 /** Eight hidden cash stashes. Values are dollars; spots never move. */
-export const STASHES = [
+export const HIDDEN_CASH = [
   { x: 24, z: -22, value: 50 },
   { x: -90, z: 60, value: 40 },
   { x: 120, z: -90, value: 75 },
@@ -89,16 +135,19 @@ export const STASHES = [
   { x: 0, z: -210, value: 65 },
 ];
 
+/** Starting cash. */
 export const START_MONEY = 50;
 
-export const DIALOGUE = {
+/** Marco's lines, one per story beat. */
+export const LINES = {
   intro: 'MARCO: Solmarina, kid. The city runs on borrowed cars.',
   marina: 'MARCO: Package is in the trunk. Pier, before the sun drops.',
   setup: 'MARCO: It was a setup. Lose the heat, then get home.',
   done: 'MARCO: That is the whole story, kid. Solmarina is yours.',
 };
 
-export const PALETTE = {
+/** Dusk palette: sky, fog, sea, sand, asphalt, accents. */
+export const COLORS = {
   sky: 0x2a1846,
   fog: 0x2a1846,
   sun: 0xffe9b0,
@@ -117,10 +166,11 @@ export const PALETTE = {
   hudRed: '#ff6b6b',
 };
 
+/** System font stack, used by the HUD and the minimap. */
 export const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 /** Renderer quality rungs: pixel ratio per rung, lowest first. */
-export const QUALITY = [
+export const QUALITY_RUNGS = [
   { pixelRatio: 0.66, label: 'low' },
   { pixelRatio: 0.85, label: 'medium' },
   { pixelRatio: 1, label: 'high' },

@@ -47,11 +47,13 @@ window.__sunset = {
   renderer,
 };
 
+/** The one-line status screen readers announce. */
 function announce(message) {
   status.textContent = message;
 }
 
-function runShot(name) {
+/** Screenshot mode: stage the scene, paint it twice, flag it ready. */
+function bootShot(name) {
   const scene = stageShot(name, world, renderer);
   let painted = 0;
   function paint() {
@@ -64,20 +66,25 @@ function runShot(name) {
   requestAnimationFrame(paint);
 }
 
-function runGame() {
-  const input = createInput(canvas);
-  let accumulator = 0;
-  let last = performance.now();
-  let lastMouseAt = -99;
-  let elapsed = 0;
+/** The playable game: the loop, the screens and the sounds. */
+class SunsetGame {
+  constructor() {
+    this.input = createInput(canvas);
+    this.accumulator = 0;
+    this.last = performance.now();
+    this.lastMouseAt = -99;
+    this.elapsed = 0;
+    this.frame = this.frame.bind(this);
+  }
 
-  function startGame() {
+  start() {
     screen = SCREEN_PLAY;
-    input.clearPresses();
+    this.input.clearPresses();
     announce('Playing. Steal a car — walk up to one and press E.');
   }
 
-  function handleEvents(events) {
+  /** Turn a step's event flags into screens and sounds. */
+  routeEvents(events) {
     if (events & EV_BUSTED) {
       screen = SCREEN_BUSTED;
       announce('Busted. Press Enter to wake up at the safehouse.');
@@ -92,89 +99,109 @@ function runGame() {
     if (events & EV_TICK) audio.tick();
   }
 
-  function handlePresses() {
-    if (input.takePress('mute')) {
+  /** The confirm key: title starts, busted respawns, paused resumes. */
+  confirmPressed() {
+    if (screen === SCREEN_TITLE) {
+      this.start();
+    } else if (screen === SCREEN_BUSTED) {
+      world.respawn();
+      screen = SCREEN_PLAY;
+      announce('Back on the street. The safehouse again.');
+    } else if (screen === SCREEN_PAUSED) {
+      screen = SCREEN_PLAY;
+      announce('Playing.');
+    }
+  }
+
+  /** The pause key: play pauses, paused resumes. */
+  pausePressed() {
+    if (screen === SCREEN_PLAY) {
+      screen = SCREEN_PAUSED;
+      announce('Paused.');
+    } else if (screen === SCREEN_PAUSED) {
+      screen = SCREEN_PLAY;
+      announce('Playing.');
+    }
+  }
+
+  /** One-shot presses: menus first, then the in-play actions. */
+  routePresses() {
+    if (this.input.takePress('mute')) {
       audio.setMuted(!audio.muted);
       return;
     }
-    if (input.takePress('confirm')) {
-      if (screen === SCREEN_TITLE) startGame();
-      else if (screen === SCREEN_BUSTED) {
-        world.respawn();
-        screen = SCREEN_PLAY;
-        announce('Back on the street. The safehouse again.');
-      } else if (screen === SCREEN_PAUSED) {
-        screen = SCREEN_PLAY;
-        announce('Playing.');
-      }
+    if (this.input.takePress('confirm')) {
+      this.confirmPressed();
       return;
     }
-    if (input.takePress('pause')) {
-      if (screen === SCREEN_PLAY) {
-        screen = SCREEN_PAUSED;
-        announce('Paused.');
-      } else if (screen === SCREEN_PAUSED) {
-        screen = SCREEN_PLAY;
-        announce('Playing.');
-      }
+    if (this.input.takePress('pause')) {
+      this.pausePressed();
       return;
     }
     if (screen !== SCREEN_PLAY) return;
-    if (input.takePress('interact')) {
-      const events = world.interact();
-      handleEvents(events);
-    }
-    if (input.takePress('punch')) handleEvents(world.punch());
-    if (input.takePress('horn')) handleEvents(world.horn());
+    if (this.input.takePress('interact')) this.routeEvents(world.interact());
+    if (this.input.takePress('punch')) this.routeEvents(world.punch());
+    if (this.input.takePress('horn')) this.routeEvents(world.horn());
   }
 
-  function frame(now) {
-    requestAnimationFrame(frame);
-    const frameSeconds = Math.min((now - last) / 1000, MAX_FRAME);
-    last = now;
-    accumulator += frameSeconds;
-    elapsed += frameSeconds;
-
-    const look = input.takeLook();
+  /** The camera: drag orbits it, and it follows the car when idle. */
+  followCamera(frameSeconds) {
+    const look = this.input.takeLook();
     if (look.x !== 0 || look.y !== 0) {
       renderer.camYaw -= look.x * 0.0045;
-      lastMouseAt = elapsed;
-    } else if (!world.state.player.onFoot && elapsed - lastMouseAt > CAM_FOLLOW_IDLE) {
-      // Hands off the mouse while driving: ease the camera behind the car.
-      let diff = world.state.player.yaw - renderer.camYaw;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      renderer.camYaw += diff * Math.min(1, frameSeconds * 1.4);
+      this.lastMouseAt = this.elapsed;
+      return;
     }
-
-    handlePresses();
-    while (accumulator >= STEP) {
-      accumulator -= STEP;
-      if (screen === SCREEN_TITLE) {
-        world.step(STEP, { forward: 0, strafe: 0, run: false }, { camYaw: 0 }, elapsed);
-      } else if (screen === SCREEN_PLAY) {
-        const events = world.step(STEP, input.moveInput(), { camYaw: renderer.camYaw }, elapsed);
-        handleEvents(events);
-      }
-    }
-    audio.update(world.state);
-    renderer.draw(world.state, screen, STEP, elapsed);
+    if (world.state.player.onFoot) return;
+    if (this.elapsed - this.lastMouseAt <= CAM_FOLLOW_IDLE) return;
+    // Hands off the mouse while driving: ease the camera behind the car.
+    let diff = world.state.player.yaw - renderer.camYaw;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    renderer.camYaw += diff * Math.min(1, frameSeconds * 1.4);
   }
 
-  document.getElementById('start-button').addEventListener('click', () => {
-    audio.setMuted(audio.muted);
-    if (screen === SCREEN_TITLE) startGame();
-  });
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
+  /** Advance the world by the fixed steps this frame owes. */
+  advance() {
+    while (this.accumulator >= STEP) {
+      this.accumulator -= STEP;
+      if (screen === SCREEN_TITLE) {
+        world.step(STEP, { forward: 0, strafe: 0, run: false }, { camYaw: 0 }, this.elapsed);
+      } else if (screen === SCREEN_PLAY) {
+        const events = world.step(STEP, this.input.moveInput(), { camYaw: renderer.camYaw }, this.elapsed);
+        this.routeEvents(events);
+      }
     }
-  });
+  }
 
-  announce('Sunset Heat. Press Enter or START ENGINE to play.');
-  requestAnimationFrame(frame);
+  frame(now) {
+    requestAnimationFrame(this.frame);
+    const frameSeconds = Math.min((now - this.last) / 1000, MAX_FRAME);
+    this.last = now;
+    this.accumulator += frameSeconds;
+    this.elapsed += frameSeconds;
+    this.followCamera(frameSeconds);
+    this.routePresses();
+    this.advance();
+    audio.update(world.state);
+    renderer.draw(world.state, screen, STEP, this.elapsed);
+  }
+
+  run() {
+    document.getElementById('start-button').addEventListener('click', () => {
+      audio.setMuted(audio.muted);
+      if (screen === SCREEN_TITLE) this.start();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && screen === SCREEN_PLAY) {
+        screen = SCREEN_PAUSED;
+        announce('Paused.');
+      }
+    });
+    announce('Sunset Heat. Press Enter or START ENGINE to play.');
+    requestAnimationFrame(this.frame);
+  }
 }
 
-if (shot) runShot(shot);
-else runGame();
+if (shot) bootShot(shot);
+else new SunsetGame().run();

@@ -7,90 +7,122 @@
 // playable.
 
 import * as THREE from 'three';
-import { BEACH_Z, CAR, MISSIONS, PALETTE, QUALITY, QUALITY_WINDOW, SEA_Z, WORLD } from './config.js';
+import { COLORS, DRIVING, ISLAND, JOBS, QUALITY_RUNGS, QUALITY_WINDOW, STREETS } from './config.js';
 import { buildCity } from './city.js';
 
+/** Screen names the loop and the screenshots share. */
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
 export const SCREEN_PAUSED = 'paused';
 export const SCREEN_BUSTED = 'busted';
 
-/** Merge coloured boxes into one geometry (cars, people, props). */
-function mergeColoredBoxes(parts) {
-  const positions = [];
-  const normals = [];
-  const colors = [];
-  const indices = [];
-  let base = 0;
-  const tint = new THREE.Color();
-  for (const part of parts) {
+/**
+ * A box soup: parts go in one at a time, and `build()` folds them into a
+ * single vertex-coloured geometry. Every part is
+ * {w, h, d, x, y, z, ry, color}; the colour lands on every vertex of the
+ * box, so one mesh can wear many colours without a material per part.
+ */
+class BoxBuilder {
+  constructor() {
+    this.pos = [];
+    this.nor = [];
+    this.col = [];
+    this.idx = [];
+    this.base = 0;
+    this.tint = new THREE.Color();
+  }
+
+  add(part) {
     const geo = new THREE.BoxGeometry(part.w, part.h, part.d);
     const matrix = new THREE.Matrix4().makeRotationY(part.ry || 0);
     matrix.setPosition(part.x, part.y, part.z);
     geo.applyMatrix4(matrix);
-    const pos = geo.attributes.position;
-    const nor = geo.attributes.normal;
-    tint.setHex(part.color);
-    for (let v = 0; v < pos.count; v += 1) {
-      positions.push(pos.getX(v), pos.getY(v), pos.getZ(v));
-      normals.push(nor.getX(v), nor.getY(v), nor.getZ(v));
-      colors.push(tint.r, tint.g, tint.b);
+    const p = geo.attributes.position;
+    const n = geo.attributes.normal;
+    this.tint.setHex(part.color);
+    for (let v = 0; v < p.count; v += 1) {
+      this.pos.push(p.getX(v), p.getY(v), p.getZ(v));
+      this.nor.push(n.getX(v), n.getY(v), n.getZ(v));
+      this.col.push(this.tint.r, this.tint.g, this.tint.b);
     }
     const index = geo.index;
-    for (let i = 0; i < index.count; i += 1) indices.push(index.getX(i) + base);
-    base += pos.count;
+    for (let i = 0; i < index.count; i += 1) this.idx.push(index.getX(i) + this.base);
+    this.base += p.count;
     geo.dispose();
+    return this;
   }
-  const merged = new THREE.BufferGeometry();
-  merged.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  merged.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  merged.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  merged.setIndex(indices);
-  return merged;
+
+  build() {
+    const merged = new THREE.BufferGeometry();
+    merged.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
+    merged.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
+    merged.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    merged.setIndex(this.idx);
+    return merged;
+  }
 }
 
+/** Shorthand for one coloured box in a builder. */
+function box(builder, w, h, d, x, y, z, color) {
+  builder.add({ w, h, d, x, y, z, color });
+  return builder;
+}
+
+/** A person: legs, torso, arms and head, in a shirt colour. */
 function personGeometry(shirt) {
   const skin = 0xd9a077;
   const pants = 0x23232e;
-  return mergeColoredBoxes([
-    { w: 0.34, h: 0.8, d: 0.34, x: -0.2, y: 0.4, z: 0, color: pants },
-    { w: 0.34, h: 0.8, d: 0.34, x: 0.2, y: 0.4, z: 0, color: pants },
-    { w: 0.85, h: 0.68, d: 0.45, x: 0, y: 1.14, z: 0, color: shirt },
-    { w: 0.22, h: 0.62, d: 0.22, x: -0.55, y: 1.12, z: 0, color: shirt },
-    { w: 0.22, h: 0.62, d: 0.22, x: 0.55, y: 1.12, z: 0, color: shirt },
-    { w: 0.42, h: 0.4, d: 0.4, x: 0, y: 1.68, z: 0, color: skin },
-  ]);
+  const b = new BoxBuilder();
+  box(b, 0.34, 0.8, 0.34, -0.2, 0.4, 0, pants);
+  box(b, 0.34, 0.8, 0.34, 0.2, 0.4, 0, pants);
+  box(b, 0.85, 0.68, 0.45, 0, 1.14, 0, shirt);
+  box(b, 0.22, 0.62, 0.22, -0.55, 1.12, 0, shirt);
+  box(b, 0.22, 0.62, 0.22, 0.55, 1.12, 0, shirt);
+  box(b, 0.42, 0.4, 0.4, 0, 1.68, 0, skin);
+  return b.build();
 }
 
+/** A car: body, cabin, four wheels, headlights and taillights. */
 function carGeometry(color) {
   const dark = 0x15151a;
-  return mergeColoredBoxes([
-    { w: 1.9, h: 0.75, d: 4.3, x: 0, y: 0.62, z: 0, color },
-    { w: 1.7, h: 0.62, d: 2.2, x: 0, y: 1.28, z: -0.25, color: 0x1b1e26 },
-    { w: 0.35, h: 0.7, d: 0.72, x: -0.95, y: 0.35, z: 1.45, color: dark },
-    { w: 0.35, h: 0.7, d: 0.72, x: 0.95, y: 0.35, z: 1.45, color: dark },
-    { w: 0.35, h: 0.7, d: 0.72, x: -0.95, y: 0.35, z: -1.45, color: dark },
-    { w: 0.35, h: 0.7, d: 0.72, x: 0.95, y: 0.35, z: -1.45, color: dark },
-    { w: 0.34, h: 0.2, d: 0.1, x: -0.55, y: 0.72, z: 2.16, color: 0xffe9a8 },
-    { w: 0.34, h: 0.2, d: 0.1, x: 0.55, y: 0.72, z: 2.16, color: 0xffe9a8 },
-    { w: 0.34, h: 0.2, d: 0.1, x: -0.55, y: 0.72, z: -2.16, color: 0xc22a2a },
-    { w: 0.34, h: 0.2, d: 0.1, x: 0.55, y: 0.72, z: -2.16, color: 0xc22a2a },
-  ]);
+  const b = new BoxBuilder();
+  box(b, 1.9, 0.75, 4.3, 0, 0.62, 0, color);
+  box(b, 1.7, 0.62, 2.2, 0, 1.28, -0.25, 0x1b1e26);
+  for (const sx of [-0.95, 0.95]) {
+    for (const sz of [1.45, -1.45]) box(b, 0.35, 0.7, 0.72, sx, 0.35, sz, dark);
+  }
+  box(b, 0.34, 0.2, 0.1, -0.55, 0.72, 2.16, 0xffe9a8);
+  box(b, 0.34, 0.2, 0.1, 0.55, 0.72, 2.16, 0xffe9a8);
+  box(b, 0.34, 0.2, 0.1, -0.55, 0.72, -2.16, 0xc22a2a);
+  box(b, 0.34, 0.2, 0.1, 0.55, 0.72, -2.16, 0xc22a2a);
+  return b.build();
 }
 
-export function createRenderer(canvas, layout, random) {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'low-power' });
-  if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
-  if (THREE.ACESFilmicToneMapping !== undefined) renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+/** The sunset band on the northern horizon: a painted gradient plane. */
+function makeSkyBand() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createLinearGradient(0, 0, 0, 256);
+  const stops = [[0, '#241543'], [0.45, '#5a2a63'], [0.75, '#b85a3c'], [1, '#ff9a5c']];
+  for (const [offset, color] of stops) gradient.addColorStop(offset, color);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 512, 256);
+  const tex = new THREE.CanvasTexture(canvas);
+  const band = new THREE.Mesh(
+    new THREE.PlaneGeometry(1500, 460),
+    new THREE.MeshBasicMaterial({ map: tex, fog: false }),
+  );
+  band.rotation.y = Math.PI;
+  band.position.set(0, 150, 560);
+  return band;
+}
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(PALETTE.sky);
-  scene.fog = new THREE.Fog(PALETTE.fog, 130, 560);
-
-  const hemi = new THREE.HemisphereLight(PALETTE.hemiSky, PALETTE.hemiGround, 1.1);
-  scene.add(hemi);
-  const sunLight = new THREE.DirectionalLight(PALETTE.sunLight, 1.25);
+/** The lights: sky bounce, the low sun, and a warm fill from the south. */
+function addLights(scene) {
+  scene.add(new THREE.HemisphereLight(COLORS.hemiSky, COLORS.hemiGround, 1.1));
+  const sunLight = new THREE.DirectionalLight(COLORS.sunLight, 1.25);
   sunLight.position.set(150, 200, 300);
   scene.add(sunLight);
   // A warm fill from the south, so the faces turned toward the camera
@@ -98,11 +130,13 @@ export function createRenderer(canvas, layout, random) {
   const fillLight = new THREE.DirectionalLight(0xffe0c0, 0.9);
   fillLight.position.set(-60, 140, -260);
   scene.add(fillLight);
+}
 
-  // The low sun and its haze, hanging over the sea to the north.
+/** The low sun, its haze, and the gradient band over the sea. */
+function addSky(scene) {
   const sunDisc = new THREE.Mesh(
     new THREE.CircleGeometry(55, 32),
-    new THREE.MeshBasicMaterial({ color: PALETTE.sun, fog: false }),
+    new THREE.MeshBasicMaterial({ color: COLORS.sun, fog: false }),
   );
   sunDisc.position.set(30, 160, 520);
   scene.add(sunDisc);
@@ -112,28 +146,298 @@ export function createRenderer(canvas, layout, random) {
   );
   sunGlow.position.set(30, 160, 515);
   scene.add(sunGlow);
+  scene.add(makeSkyBand());
+}
 
-  // The sunset band itself: a gradient backdrop on the northern horizon.
-  const skyCanvas = document.createElement('canvas');
-  skyCanvas.width = 512;
-  skyCanvas.height = 256;
-  const skyCtx = skyCanvas.getContext('2d');
-  const gradient = skyCtx.createLinearGradient(0, 0, 0, 256);
-  gradient.addColorStop(0, '#241543');
-  gradient.addColorStop(0.45, '#5a2a63');
-  gradient.addColorStop(0.75, '#b85a3c');
-  gradient.addColorStop(1, '#ff9a5c');
-  skyCtx.fillStyle = gradient;
-  skyCtx.fillRect(0, 0, 512, 256);
-  const skyTex = new THREE.CanvasTexture(skyCanvas);
-  const skyBand = new THREE.Mesh(
-    new THREE.PlaneGeometry(1500, 460),
-    new THREE.MeshBasicMaterial({ map: skyTex, fog: false }),
-  );
-  skyBand.rotation.y = Math.PI;
-  skyBand.position.set(0, 150, 560);
-  scene.add(skyBand);
+/**
+ * Keep a pool of three.js groups in step with a list of game objects:
+ * create a group for each newcomer, update every live one, drop the
+ * groups whose object left the list. `keyOf` picks the pool key.
+ */
+function syncPool(pool, scene, items, keyOf, create, update) {
+  const seen = new Set();
+  for (const item of items) {
+    const key = keyOf(item);
+    seen.add(key);
+    let group = pool.get(key);
+    if (!group) {
+      group = create(item);
+      pool.set(key, group);
+      scene.add(group);
+    }
+    update(group, item);
+  }
+  for (const [key, group] of pool) {
+    if (!seen.has(key)) {
+      scene.remove(group);
+      pool.delete(key);
+    }
+  }
+}
 
+/** Exhaust smoke: one Points cloud, a pool of puffs that rise and fade. */
+class SmokeTrail {
+  constructor(scene) {
+    this.pool = 24;
+    this.positions = new Float32Array(this.pool * 3);
+    this.life = new Float32Array(this.pool);
+    for (let i = 0; i < this.pool; i += 1) this.positions[i * 3 + 1] = -100;
+    this.geo = new THREE.BufferGeometry();
+    this.geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    this.points = new THREE.Points(this.geo, new THREE.PointsMaterial({
+      color: 0x8a8a92, size: 2.6, transparent: true, opacity: 0.4, sizeAttenuation: true,
+    }));
+    this.points.frustumCulled = false;
+    scene.add(this.points);
+    this.cursor = 0;
+    this.timer = 0;
+  }
+
+  update(state, dt) {
+    const car = state.player.car;
+    const smoking = !state.player.onFoot && car && car.dmg > DRIVING.smokeFrom && Math.abs(car.speed) > 2;
+    this.timer -= dt;
+    if (smoking && this.timer <= 0) {
+      this.timer = 0.12;
+      const i = this.cursor;
+      this.cursor = (this.cursor + 1) % this.pool;
+      this.positions[i * 3] = car.x - Math.sin(car.yaw) * 2.2;
+      this.positions[i * 3 + 1] = 0.9;
+      this.positions[i * 3 + 2] = car.z - Math.cos(car.yaw) * 2.2;
+      this.life[i] = 1;
+    }
+    for (let i = 0; i < this.pool; i += 1) {
+      if (this.life[i] <= 0) continue;
+      this.life[i] -= dt * 0.9;
+      this.positions[i * 3 + 1] += dt * 1.6;
+      if (this.life[i] <= 0) this.positions[i * 3 + 1] = -100;
+    }
+    this.geo.attributes.position.needsUpdate = true;
+  }
+}
+
+/** Watches real frame time and steps the pixel ratio down when it sags. */
+class QualityGovernor {
+  constructor(apply) {
+    this.apply = apply;
+    this.level = 1;
+    this.ema = 16;
+    this.frames = 0;
+    this.cooldown = 0;
+    this.lastWall = 0;
+  }
+
+  observe() {
+    const now = performance.now();
+    if (this.lastWall > 0) {
+      const gap = now - this.lastWall;
+      if (gap > 0 && gap < 1000) {
+        this.ema = this.ema * 0.95 + gap * 0.05;
+        this.frames += 1;
+        this.cooldown -= 1;
+        if (this.frames >= QUALITY_WINDOW && this.cooldown <= 0) {
+          this.frames = 0;
+          this.cooldown = QUALITY_WINDOW;
+          const fps = 1000 / Math.max(1, this.ema);
+          if (fps < 30 && this.level > 0) {
+            this.level -= 1;
+            this.apply(this.level);
+          } else if (fps > 50 && this.level < QUALITY_RUNGS.length - 1) {
+            this.level += 1;
+            this.apply(this.level);
+          }
+        }
+      }
+    }
+    this.lastWall = now;
+  }
+}
+
+/** The DOM half: HUD text, bars, screens, and the 2D minimap. */
+class Hud {
+  constructor() {
+    const el = (id) => document.getElementById(id);
+    this.nodes = {
+      root: el('hud'),
+      money: el('money'),
+      stars: el('stars'),
+      healthFill: el('health-fill'),
+      carRow: el('car-row'),
+      carFill: el('car-fill'),
+      missionNum: el('mission-num'),
+      missionObjective: el('mission-objective'),
+      missionText: el('mission-text'),
+      missionTimer: el('mission-timer'),
+      stashCount: el('stash-count'),
+      prompt: el('prompt'),
+      dialogue: el('dialogue'),
+      dialogueText: el('dialogue-text'),
+      banner: el('banner'),
+      speed: el('speed'),
+      title: el('screen-title'),
+      paused: el('screen-paused'),
+      busted: el('screen-busted'),
+      minimap: el('minimap'),
+    };
+    this.cache = {};
+    this.minimapTick = 0;
+  }
+
+  setText(node, key, value) {
+    if (!node || this.cache[key] === value) return;
+    this.cache[key] = value;
+    node.textContent = value;
+  }
+
+  setShown(node, key, show) {
+    if (!node || this.cache[key] === show) return;
+    this.cache[key] = show;
+    node.style.display = show ? '' : 'none';
+  }
+
+  setBarWidth(node, key, width) {
+    if (!node || this.cache[key] === width) return;
+    this.cache[key] = width;
+    node.style.width = width;
+  }
+
+  /** The card for the current job, or the story-complete card. */
+  missionCard(state) {
+    if (state.storyDone) {
+      return { num: '★', name: 'Story complete', objective: 'Solmarina is yours — free roam', timer: '' };
+    }
+    const job = JOBS[state.missionIndex] || JOBS[0];
+    return {
+      num: `${state.missionIndex + 1}`,
+      name: job.name,
+      objective: job.stages[state.missionStage] || job.stages[0],
+      timer: state.missionIndex === 1 ? `⏱ ${Math.max(0, Math.ceil(state.missionTimer))}s` : '',
+    };
+  }
+
+  paint(state, screen) {
+    const n = this.nodes;
+    this.setShown(n.root, 'hud', screen !== SCREEN_TITLE);
+    this.setShown(n.title, 'title', screen === SCREEN_TITLE);
+    this.setShown(n.paused, 'paused', screen === SCREEN_PAUSED);
+    this.setShown(n.busted, 'busted', screen === SCREEN_BUSTED);
+    if (screen === SCREEN_TITLE) return;
+    this.setText(n.money, 'money', `$${state.money}`);
+    this.setText(n.stars, 'stars', '★'.repeat(state.wanted) + '☆'.repeat(5 - state.wanted));
+    if (n.stars) n.stars.style.color = state.wanted > 0 ? '#ff6b6b' : '#8b93a3';
+    this.setBarWidth(n.healthFill, 'healthWidth', `${Math.max(0, state.health)}%`);
+    const car = state.player.car;
+    this.setShown(n.carRow, 'carRow', !state.player.onFoot && !!car);
+    if (car) this.setBarWidth(n.carFill, 'carWidth', `${Math.max(0, (1 - car.dmg) * 100)}%`);
+    const card = this.missionCard(state);
+    this.setText(n.missionNum, 'missionNum', card.num);
+    this.setText(n.missionObjective, 'missionObjective', `${card.num} · ${card.name}`);
+    this.setText(n.missionText, 'missionText', card.objective);
+    this.setText(n.missionTimer, 'missionTimer', card.timer);
+    this.setShown(n.missionTimer, 'missionTimerShown', card.timer !== '');
+    this.setText(n.stashCount, 'stashCount', `STASHES ${state.stashesFound}/8`);
+    this.setText(n.prompt, 'prompt', state.prompt);
+    this.setShown(n.prompt, 'promptShown', state.prompt !== '');
+    const showDialogue = state.missionIndex === 0 && !!state.dialogue;
+    this.setShown(n.dialogue, 'dialogue', showDialogue);
+    if (showDialogue) this.setText(n.dialogueText, 'dialogueText', state.dialogue);
+    this.setText(n.banner, 'banner', state.banner);
+    this.setShown(n.banner, 'bannerShown', state.banner !== '');
+    const kmh = car ? Math.round(Math.abs(car.speed) * 3.6) : 0;
+    this.setText(n.speed, 'speed', !state.player.onFoot && car ? `${kmh} km/h` : '');
+    // The minimap is a 2D repaint: every fifth draw is plenty.
+    this.minimapTick += 1;
+    if (this.minimapTick % 5 === 1) this.paintMinimap(state);
+  }
+
+  /** Streets, sand and sea, then the markers and the moving dots. */
+  paintMinimap(state) {
+    const map = this.nodes.minimap;
+    if (!map) return;
+    const ctx = map.getContext('2d');
+    const S = map.width;
+    const toX = (x) => ((x - ISLAND.west) / (ISLAND.east - ISLAND.west)) * S;
+    const toY = (z) => ((z - ISLAND.south) / (ISLAND.north - ISLAND.south)) * S;
+    ctx.clearRect(0, 0, S, S);
+    ctx.fillStyle = 'rgba(10, 10, 18, 0.88)';
+    ctx.fillRect(0, 0, S, S);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.09)';
+    ctx.lineWidth = 1;
+    for (let x = -240; x <= 240; x += STREETS.every) {
+      ctx.beginPath();
+      ctx.moveTo(toX(x), 0);
+      ctx.lineTo(toX(x), S);
+      ctx.stroke();
+    }
+    for (let z = -240; z <= 240; z += STREETS.every) {
+      ctx.beginPath();
+      ctx.moveTo(0, toY(z));
+      ctx.lineTo(S, toY(z));
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#c9a06a';
+    ctx.fillRect(0, toY(ISLAND.sandAt), S, S - toY(ISLAND.sandAt));
+    ctx.fillStyle = '#16324a';
+    ctx.fillRect(0, toY(ISLAND.waterAt), S, S - toY(ISLAND.waterAt));
+    // Safehouse: green square, and N for north at the sea edge.
+    ctx.fillStyle = '#2fae5f';
+    ctx.fillRect(toX(-30) - 4, toY(-150) - 4, 8, 8);
+    ctx.fillStyle = '#e8e8f0';
+    ctx.font = 'bold 11px system-ui, sans-serif';
+    ctx.fillText('N', S - 14, S - 6);
+    const diamond = (x, y, r, color) => {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(x, y - r);
+      ctx.lineTo(x + r, y);
+      ctx.lineTo(x, y + r);
+      ctx.lineTo(x - r, y);
+      ctx.closePath();
+      ctx.fill();
+    };
+    for (const stash of state.stashes) {
+      if (stash.found) continue;
+      diamond(toX(stash.x), toY(stash.z), 4, '#ffc93c');
+    }
+    if (state.objective && !state.storyDone) {
+      diamond(toX(state.objective.x), toY(state.objective.z), 6, '#ffd75e');
+    }
+    for (const ped of state.peds) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.fillRect(toX(ped.x) - 1, toY(ped.z) - 1, 2, 2);
+    }
+    for (const car of state.cars) {
+      ctx.fillStyle = car.kind === 'cop' ? '#ff4444' : 'rgba(255, 255, 255, 0.6)';
+      ctx.fillRect(toX(car.x) - 1.5, toY(car.z) - 1.5, 3, 3);
+    }
+    const px = toX(state.player.x);
+    const py = toY(state.player.z);
+    const yaw = state.player.yaw;
+    ctx.fillStyle = '#3fa7ff';
+    ctx.beginPath();
+    ctx.moveTo(px + Math.sin(yaw) * 7, py + Math.cos(yaw) * 7);
+    ctx.lineTo(px + Math.sin(yaw + 2.5) * 5, py + Math.cos(yaw + 2.5) * 5);
+    ctx.lineTo(px + Math.sin(yaw - 2.5) * 5, py + Math.cos(yaw - 2.5) * 5);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+/**
+ * Build the renderer: the three.js scene, the HUD handles and the camera.
+ * `layout` is the city's rolled layout; `random` paints the facades.
+ */
+export function createRenderer(canvas, layout, random) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'low-power' });
+  if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
+  if (THREE.ACESFilmicToneMapping !== undefined) renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(COLORS.sky);
+  scene.fog = new THREE.Fog(COLORS.fog, 130, 560);
+  addLights(scene);
+  addSky(scene);
   buildCity(scene, layout, random);
 
   const camera = new THREE.PerspectiveCamera(62, 16 / 9, 0.1, 1500);
@@ -141,7 +445,7 @@ export function createRenderer(canvas, layout, random) {
 
   const carMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
   const personMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
-  const goldMaterial = new THREE.MeshBasicMaterial({ color: PALETTE.gold });
+  const goldMaterial = new THREE.MeshBasicMaterial({ color: COLORS.gold });
   const beaconMaterial = new THREE.MeshBasicMaterial({
     color: 0xffd75e, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false,
   });
@@ -168,32 +472,20 @@ export function createRenderer(canvas, layout, random) {
   beacon.add(beaconTop);
   scene.add(beacon);
 
-  // Exhaust smoke: one Points cloud, a pool of puffs that rise and fade.
-  const SMOKE_POOL = 24;
-  const smokePositions = new Float32Array(SMOKE_POOL * 3);
-  const smokeLife = new Float32Array(SMOKE_POOL);
-  for (let i = 0; i < SMOKE_POOL; i += 1) smokePositions[i * 3 + 1] = -100;
-  const smokeGeo = new THREE.BufferGeometry();
-  smokeGeo.setAttribute('position', new THREE.BufferAttribute(smokePositions, 3));
-  const smoke = new THREE.Points(smokeGeo, new THREE.PointsMaterial({
-    color: 0x8a8a92, size: 2.6, transparent: true, opacity: 0.4, sizeAttenuation: true,
-  }));
-  smoke.frustumCulled = false;
-  scene.add(smoke);
-  let smokeCursor = 0;
-  let smokeTimer = 0;
+  const smoke = new SmokeTrail(scene);
+  const hud = new Hud();
 
   const api = {
     camYaw: 0,
-    quality: 1,
     shotCam: null,
-    _camPos: new THREE.Vector3(0, 150, -180),
-    _lookAt: new THREE.Vector3(0, 0, 0),
-    _lastDrawWall: 0,
-    _frameTimeEma: 16,
-    _frameCount: 0,
-    _qualityCooldown: 0,
+    camPos: new THREE.Vector3(0, 150, -180),
+    lookAt: new THREE.Vector3(0, 0, 0),
   };
+  const governor = new QualityGovernor((level) => {
+    const rung = QUALITY_RUNGS[level] || QUALITY_RUNGS[1];
+    renderer.setPixelRatio(rung.pixelRatio);
+    resize();
+  });
 
   function resize() {
     const width = canvas.clientWidth || 1280;
@@ -206,42 +498,40 @@ export function createRenderer(canvas, layout, random) {
   window.addEventListener('resize', resize);
 
   function applyQuality() {
-    const rung = QUALITY[api.quality] || QUALITY[1];
+    const rung = QUALITY_RUNGS[governor.level] || QUALITY_RUNGS[1];
     renderer.setPixelRatio(rung.pixelRatio);
     resize();
   }
   applyQuality();
 
+  /** One car group per live car, with its roof sign or light bar. */
+  function makeCarGroup(car) {
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(carGeometry(car.color), carMaterial);
+    body.userData.color = car.color;
+    group.add(body);
+    if (car.kind === 'cop') {
+      const bar = new THREE.Mesh(
+        new THREE.BoxGeometry(1.2, 0.28, 0.5),
+        new THREE.MeshBasicMaterial({ color: 0xff2222 }),
+      );
+      bar.position.y = 1.72;
+      bar.name = 'lightbar';
+      group.add(bar);
+    } else if (car.kind === 'taxi') {
+      const sign = new THREE.Mesh(
+        new THREE.BoxGeometry(0.9, 0.3, 0.45),
+        new THREE.MeshBasicMaterial({ color: 0xfff2b0 }),
+      );
+      sign.position.y = 1.72;
+      group.add(sign);
+    }
+    group.userData.body = body;
+    return group;
+  }
+
   function syncCars(state, time) {
-    const seen = new Set();
-    for (const car of state.cars) {
-      seen.add(car.id);
-      let group = carGroups.get(car.id);
-      if (!group) {
-        group = new THREE.Group();
-        const body = new THREE.Mesh(carGeometry(car.color), carMaterial);
-        body.userData.color = car.color;
-        group.add(body);
-        if (car.kind === 'cop') {
-          const bar = new THREE.Mesh(
-            new THREE.BoxGeometry(1.2, 0.28, 0.5),
-            new THREE.MeshBasicMaterial({ color: 0xff2222 }),
-          );
-          bar.position.y = 1.72;
-          bar.name = 'lightbar';
-          group.add(bar);
-        } else if (car.kind === 'taxi') {
-          const sign = new THREE.Mesh(
-            new THREE.BoxGeometry(0.9, 0.3, 0.45),
-            new THREE.MeshBasicMaterial({ color: 0xfff2b0 }),
-          );
-          sign.position.y = 1.72;
-          group.add(sign);
-        }
-        group.userData.body = body;
-        carGroups.set(car.id, group);
-        scene.add(group);
-      }
+    syncPool(carGroups, scene, state.cars, (car) => car.id, makeCarGroup, (group, car) => {
       const body = group.userData.body;
       if (body.userData.color !== car.color) {
         body.geometry.dispose();
@@ -252,37 +542,21 @@ export function createRenderer(canvas, layout, random) {
       group.rotation.y = car.yaw;
       const bar = group.getObjectByName('lightbar');
       if (bar) bar.material.color.setHex(Math.floor(time * 2) % 2 === 0 ? 0xff2222 : 0x2244ff);
-    }
-    for (const [id, group] of carGroups) {
-      if (!seen.has(id)) {
-        scene.remove(group);
-        carGroups.delete(id);
-      }
-    }
+    });
   }
 
-  function syncPeds(state, time) {
-    const seen = new Set();
+  /** Pedestrians and officers share the walker pool. */
+  function syncPeds(state) {
     const walkers = [...state.peds, ...state.officers];
-    for (const ped of walkers) {
-      seen.add(ped);
-      let group = pedGroups.get(ped);
-      if (!group) {
-        group = new THREE.Group();
-        group.add(new THREE.Mesh(personGeometry(ped.shirt || 0x3a6fd2), personMaterial));
-        pedGroups.set(ped, group);
-        scene.add(group);
-      }
+    syncPool(pedGroups, scene, walkers, (ped) => ped, (ped) => {
+      const group = new THREE.Group();
+      group.add(new THREE.Mesh(personGeometry(ped.shirt || 0x3a6fd2), personMaterial));
+      return group;
+    }, (group, ped) => {
       group.position.set(ped.x, ped.mode === 'down' ? 0.35 : Math.abs(Math.sin(ped.bob || 0)) * 0.06, ped.z);
       group.rotation.y = ped.yaw || 0;
       group.rotation.x = ped.mode === 'down' ? -1.5 : 0;
-    }
-    for (const [ped, group] of pedGroups) {
-      if (!seen.has(ped)) {
-        scene.remove(group);
-        pedGroups.delete(ped);
-      }
-    }
+    });
   }
 
   function syncPlayer(state) {
@@ -293,6 +567,7 @@ export function createRenderer(canvas, layout, random) {
     playerGroup.rotation.y = player.yaw;
   }
 
+  /** The gold diamonds over the stashes not yet found. */
   function syncStashes(state, time) {
     state.stashes.forEach((stash, i) => {
       const mesh = stashMeshes[i];
@@ -303,6 +578,7 @@ export function createRenderer(canvas, layout, random) {
     });
   }
 
+  /** The light pillar over the current objective. */
   function syncBeacon(state, time) {
     const show = !!state.objective && !state.storyDone;
     beacon.visible = show;
@@ -312,40 +588,15 @@ export function createRenderer(canvas, layout, random) {
     beacon.children[1].position.y = 5 + Math.sin(time * 2.4) * 0.6;
   }
 
-  function syncSmoke(state, dt) {
-    const car = state.player.car;
-    const smoking = !state.player.onFoot && car && car.dmg > CAR.smokeFrom && Math.abs(car.speed) > 2;
-    smokeTimer -= dt;
-    if (smoking && smokeTimer <= 0) {
-      smokeTimer = 0.12;
-      const i = smokeCursor;
-      smokeCursor = (smokeCursor + 1) % SMOKE_POOL;
-      smokePositions[i * 3] = car.x - Math.sin(car.yaw) * 2.2;
-      smokePositions[i * 3 + 1] = 0.9;
-      smokePositions[i * 3 + 2] = car.z - Math.cos(car.yaw) * 2.2;
-      smokeLife[i] = 1;
-    }
-    for (let i = 0; i < SMOKE_POOL; i += 1) {
-      if (smokeLife[i] <= 0) continue;
-      smokeLife[i] -= dt * 0.9;
-      smokePositions[i * 3 + 1] += dt * 1.6;
-      if (smokeLife[i] <= 0) smokePositions[i * 3 + 1] = -100;
-    }
-    smokeGeo.attributes.position.needsUpdate = true;
+  /** The slow orbit over the city while the title is up. */
+  function titleCamera(time) {
+    const angle = time * 0.03;
+    camera.position.set(Math.sin(angle) * 230, 150, Math.cos(angle) * 230 - 20);
+    camera.lookAt(0, 10, 30);
   }
 
-  function updateCamera(state, screen, dt, time) {
-    if (api.shotCam) {
-      camera.position.set(api.shotCam.pos[0], api.shotCam.pos[1], api.shotCam.pos[2]);
-      camera.lookAt(api.shotCam.look[0], api.shotCam.look[1], api.shotCam.look[2]);
-      return;
-    }
-    if (screen === SCREEN_TITLE) {
-      const angle = time * 0.03;
-      camera.position.set(Math.sin(angle) * 230, 150, Math.cos(angle) * 230 - 20);
-      camera.lookAt(0, 10, 30);
-      return;
-    }
+  /** The chase camera: eased behind the player, looking where they face. */
+  function chaseCamera(state, dt) {
     const player = state.player;
     const inCar = !player.onFoot;
     const dist = inCar ? 10.5 : 7;
@@ -354,215 +605,40 @@ export function createRenderer(canvas, layout, random) {
     const fz = Math.cos(api.camYaw);
     const wanted = new THREE.Vector3(player.x - fx * dist, height, player.z - fz * dist);
     const k = 1 - Math.exp(-7 * Math.max(dt, 1 / 240));
-    api._camPos.lerp(wanted, k);
-    api._lookAt.set(player.x + fx * 3, 1.6, player.z + fz * 3);
-    camera.position.copy(api._camPos);
-    camera.lookAt(api._lookAt);
+    api.camPos.lerp(wanted, k);
+    api.lookAt.set(player.x + fx * 3, 1.6, player.z + fz * 3);
+    camera.position.copy(api.camPos);
+    camera.lookAt(api.lookAt);
   }
 
-  // ---- HUD (DOM) ----
-  const el = (id) => document.getElementById(id);
-  const hud = {
-    root: el('hud'),
-    money: el('money'),
-    stars: el('stars'),
-    healthFill: el('health-fill'),
-    carRow: el('car-row'),
-    carFill: el('car-fill'),
-    missionNum: el('mission-num'),
-    missionObjective: el('mission-objective'),
-    missionTimer: el('mission-timer'),
-    stashCount: el('stash-count'),
-    prompt: el('prompt'),
-    dialogue: el('dialogue'),
-    dialogueText: el('dialogue-text'),
-    banner: el('banner'),
-    speed: el('speed'),
-    title: el('screen-title'),
-    paused: el('screen-paused'),
-    busted: el('screen-busted'),
-    minimap: el('minimap'),
-  };
-  const lastHud = {};
-  function setText(node, key, value) {
-    if (!node || lastHud[key] === value) return;
-    lastHud[key] = value;
-    node.textContent = value;
-  }
-  function setShown(node, key, show) {
-    if (!node || lastHud[key] === show) return;
-    lastHud[key] = show;
-    node.style.display = show ? '' : 'none';
+  /** Chase camera, title orbit, or a fixed shot framing. */
+  function updateCamera(state, screen, dt, time) {
+    if (api.shotCam) {
+      camera.position.set(api.shotCam.pos[0], api.shotCam.pos[1], api.shotCam.pos[2]);
+      camera.lookAt(api.shotCam.look[0], api.shotCam.look[1], api.shotCam.look[2]);
+      return;
+    }
+    if (screen === SCREEN_TITLE) {
+      titleCamera(time);
+      return;
+    }
+    chaseCamera(state, dt);
   }
 
-  function drawMinimap(state) {
-    const canvas2d = hud.minimap;
-    if (!canvas2d) return;
-    const ctx = canvas2d.getContext('2d');
-    const S = canvas2d.width;
-    const toX = (x) => ((x - WORLD.minX) / (WORLD.maxX - WORLD.minX)) * S;
-    const toY = (z) => ((z - WORLD.minZ) / (WORLD.maxZ - WORLD.minZ)) * S;
-    ctx.clearRect(0, 0, S, S);
-    ctx.fillStyle = 'rgba(10, 10, 18, 0.88)';
-    ctx.fillRect(0, 0, S, S);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.09)';
-    ctx.lineWidth = 1;
-    for (let x = -240; x <= 240; x += 60) {
-      ctx.beginPath();
-      ctx.moveTo(toX(x), 0);
-      ctx.lineTo(toX(x), S);
-      ctx.stroke();
-    }
-    for (let z = -240; z <= 240; z += 60) {
-      ctx.beginPath();
-      ctx.moveTo(0, toY(z));
-      ctx.lineTo(S, toY(z));
-      ctx.stroke();
-    }
-    ctx.fillStyle = '#c9a06a';
-    ctx.fillRect(0, toY(BEACH_Z), S, S - toY(BEACH_Z));
-    ctx.fillStyle = '#16324a';
-    ctx.fillRect(0, toY(SEA_Z), S, S - toY(SEA_Z));
-    // Safehouse: green square, and N for north at the sea edge.
-    ctx.fillStyle = '#2fae5f';
-    ctx.fillRect(toX(-30) - 4, toY(-150) - 4, 8, 8);
-    ctx.fillStyle = '#e8e8f0';
-    ctx.font = 'bold 11px system-ui, sans-serif';
-    ctx.fillText('N', S - 14, S - 6);
-    for (const stash of state.stashes) {
-      if (stash.found) continue;
-      ctx.fillStyle = '#ffc93c';
-      const x = toX(stash.x);
-      const y = toY(stash.z);
-      ctx.beginPath();
-      ctx.moveTo(x, y - 4);
-      ctx.lineTo(x + 4, y);
-      ctx.lineTo(x, y + 4);
-      ctx.lineTo(x - 4, y);
-      ctx.closePath();
-      ctx.fill();
-    }
-    if (state.objective && !state.storyDone) {
-      ctx.fillStyle = '#ffd75e';
-      const x = toX(state.objective.x);
-      const y = toY(state.objective.z);
-      ctx.beginPath();
-      ctx.moveTo(x, y - 6);
-      ctx.lineTo(x + 6, y);
-      ctx.lineTo(x, y + 6);
-      ctx.lineTo(x - 6, y);
-      ctx.closePath();
-      ctx.fill();
-    }
-    for (const ped of state.peds) {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-      ctx.fillRect(toX(ped.x) - 1, toY(ped.z) - 1, 2, 2);
-    }
-    for (const car of state.cars) {
-      ctx.fillStyle = car.kind === 'cop' ? '#ff4444' : 'rgba(255, 255, 255, 0.6)';
-      ctx.fillRect(toX(car.x) - 1.5, toY(car.z) - 1.5, 3, 3);
-    }
-    const px = toX(state.player.x);
-    const py = toY(state.player.z);
-    const yaw = state.player.yaw;
-    ctx.fillStyle = '#3fa7ff';
-    ctx.beginPath();
-    ctx.moveTo(px + Math.sin(yaw) * 7, py + Math.cos(yaw) * 7);
-    ctx.lineTo(px + Math.sin(yaw + 2.5) * 5, py + Math.cos(yaw + 2.5) * 5);
-    ctx.lineTo(px + Math.sin(yaw - 2.5) * 5, py + Math.cos(yaw - 2.5) * 5);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  function updateHud(state, screen) {
-    setShown(hud.root, 'hud', screen !== SCREEN_TITLE);
-    setShown(hud.title, 'title', screen === SCREEN_TITLE);
-    setShown(hud.paused, 'paused', screen === SCREEN_PAUSED);
-    setShown(hud.busted, 'busted', screen === SCREEN_BUSTED);
-    if (screen === SCREEN_TITLE) return;
-    setText(hud.money, 'money', `$${state.money}`);
-    setText(hud.stars, 'stars', '★'.repeat(state.wanted) + '☆'.repeat(5 - state.wanted));
-    if (hud.stars) hud.stars.style.color = state.wanted > 0 ? '#ff6b6b' : '#8b93a3';
-    if (hud.healthFill) {
-      const width = `${Math.max(0, state.health)}%`;
-      if (lastHud.healthWidth !== width) {
-        lastHud.healthWidth = width;
-        hud.healthFill.style.width = width;
-      }
-    }
-    const car = state.player.car;
-    setShown(hud.carRow, 'carRow', !state.player.onFoot && !!car);
-    if (hud.carFill && car) {
-      const width = `${Math.max(0, (1 - car.dmg) * 100)}%`;
-      if (lastHud.carWidth !== width) {
-        lastHud.carWidth = width;
-        hud.carFill.style.width = width;
-      }
-    }
-    const mission = MISSIONS[state.missionIndex] || MISSIONS[0];
-    const missions = state.storyDone
-      ? { num: '★', name: 'Story complete', objective: 'Solmarina is yours — free roam', timer: '' }
-      : {
-          num: `${state.missionIndex + 1}`,
-          name: mission.name,
-          objective: mission.stages[state.missionStage] || mission.stages[0],
-          timer: state.missionIndex === 1 ? `⏱ ${Math.max(0, Math.ceil(state.missionTimer))}s` : '',
-        };
-    setText(hud.missionNum, 'missionNum', missions.num);
-    setText(hud.missionObjective, 'missionObjective', `${missions.num} · ${missions.name}`);
-    const objText = document.getElementById('mission-text');
-    setText(objText, 'missionText', missions.objective);
-    setText(hud.missionTimer, 'missionTimer', missions.timer);
-    setShown(hud.missionTimer, 'missionTimerShown', missions.timer !== '');
-    setText(hud.stashCount, 'stashCount', `STASHES ${state.stashesFound}/8`);
-    setText(hud.prompt, 'prompt', state.prompt);
-    setShown(hud.prompt, 'promptShown', state.prompt !== '');
-    const showDialogue = state.missionIndex === 0 && !!state.dialogue;
-    setShown(hud.dialogue, 'dialogue', showDialogue);
-    if (showDialogue) setText(hud.dialogueText, 'dialogueText', state.dialogue);
-    setText(hud.banner, 'banner', state.banner);
-    setShown(hud.banner, 'bannerShown', state.banner !== '');
-    const kmh = car ? Math.round(Math.abs(car.speed) * 3.6) : 0;
-    setText(hud.speed, 'speed', !state.player.onFoot && car ? `${kmh} km/h` : '');
-    // The minimap is a 2D repaint: every fifth draw is plenty.
-    api._minimapTick = (api._minimapTick || 0) + 1;
-    if (api._minimapTick % 5 === 1) drawMinimap(state);
-  }
-
+  /** One frame: sync the scene to the state, move the camera, paint. */
   function draw(state, screen, dt, time) {
-    const now = performance.now();
-    if (api._lastDrawWall > 0) {
-      const gap = now - api._lastDrawWall;
-      if (gap > 0 && gap < 1000) {
-        api._frameTimeEma = api._frameTimeEma * 0.95 + gap * 0.05;
-        api._frameCount += 1;
-        api._qualityCooldown -= 1;
-        if (api._frameCount >= QUALITY_WINDOW && api._qualityCooldown <= 0) {
-          api._frameCount = 0;
-          api._qualityCooldown = QUALITY_WINDOW;
-          const fps = 1000 / Math.max(1, api._frameTimeEma);
-          if (fps < 30 && api.quality > 0) {
-            api.quality -= 1;
-            applyQuality();
-          } else if (fps > 50 && api.quality < QUALITY.length - 1) {
-            api.quality += 1;
-            applyQuality();
-          }
-        }
-      }
-    }
-    api._lastDrawWall = now;
+    governor.observe();
     const step = dt || 1 / 60;
     const t = time || 0;
     syncCars(state, t);
-    syncPeds(state, t);
+    syncPeds(state);
     syncPlayer(state);
     syncStashes(state, t);
     syncBeacon(state, t);
-    syncSmoke(state, step);
+    smoke.update(state, step);
     updateCamera(state, screen, step, t);
     renderer.render(scene, camera);
-    updateHud(state, screen);
+    hud.paint(state, screen);
   }
 
   return {
@@ -573,10 +649,10 @@ export function createRenderer(canvas, layout, random) {
       api.camYaw = value;
     },
     get quality() {
-      return api.quality;
+      return governor.level;
     },
     set quality(value) {
-      api.quality = value;
+      governor.level = value;
       applyQuality();
     },
     draw,
