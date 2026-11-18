@@ -1,62 +1,64 @@
 // A tiny static server for game/ (Node 22, standard library only), so the
 // entry can be played locally without a build step: `node serve.ts` serves
-// game/ on http://localhost:8080 (or `--port 9000 --host 0.0.0.0`). It sends
-// the MIME types a browser game needs, refuses any path outside game/, and
-// otherwise does nothing clever: this is a development convenience, not a
-// web server for the internet.
+// game/ on http://localhost:8080 (or --port <n>). It sends the MIME types a
+// browser game needs, refuses any path outside game/, and otherwise does
+// nothing clever: a development convenience, not a web server for the
+// internet.
 import { createReadStream, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
-const args = process.argv.slice(2);
+const root = resolve(fileURLToPath(new URL('./game', import.meta.url));
 
-function flagValue(name, fallback) {
-  const i = args.indexOf(name);
-  return i === -1 ? fallback : args[i + 1];
+const MIME = new Map([
+  ['.html', 'text/html; charset=utf-8'],
+  ['.js', 'text/javascript; charset=utf-8'],
+  ['.mjs', 'text/javascript; charset=utf-8'],
+  ['.css', 'text/css; charset=utf-8'],
+  ['.json', 'application/json; charset=utf-8'],
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'],
+  ['.webp', 'image/webp'],
+  ['.svg', 'image/svg+xml'],
+  ['.ico', 'image/x-icon'],
+  ['.woff2', 'font/woff2'],
+  ['.glb', 'model/gltf-binary'],
+  ['.gltf', 'model/gltf+json'],
+  ['.bin', 'application/octet-stream'],
+  ['.wasm', 'application/wasm'],
+  ['.wav', 'audio/wav'],
+  ['.mp3', 'audio/mpeg'],
+  ['.ogg', 'audio/ogg'],
+  ['.txt', 'text/plain; charset=utf-8'],
+]);
+
+function pickPort(argv) {
+  const at = argv.indexOf('--port');
+  const wanted = at === -1 ? 8080 : Number(argv[at + 1]);
+  return Number.isInteger(wanted) && wanted > 0 && wanted < 65536 ? wanted : 8080;
 }
 
-const portArg = Number(flagValue('--port', '8080'));
-const port = Number.isInteger(portArg) && portArg > 0 && portArg < 65536 ? portArg : 8080;
-const host = flagValue('--host', '127.0.0.1');
+function resolveInside(requestPath) {
+  const cleaned = normalize(requestPath.endsWith('/') ? `${requestPath}index.html` : requestPath);
+  const file = resolve(join(root, cleaned));
+  return file === root || file.startsWith(root + sep) ? file : null;
+}
 
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-  '.glb': 'model/gltf-binary',
-  '.gltf': 'model/gltf+json',
-  '.bin': 'application/octet-stream',
-  '.wasm': 'application/wasm',
-  '.wav': 'audio/wav',
-  '.mp3': 'audio/mpeg',
-  '.ogg': 'audio/ogg',
-  '.txt': 'text/plain; charset=utf-8',
-};
+const port = pickPort(process.argv.slice(2));
 
 createServer((request, response) => {
-  const url = new URL(request.url ?? '/', 'http://localhost');
   let pathname;
   try {
-    pathname = decodeURIComponent(url.pathname);
+    pathname = decodeURIComponent(new URL(request.url ?? '/', 'http://localhost').pathname);
   } catch {
     response.writeHead(400).end('bad request');
     return;
   }
-  if (pathname.endsWith('/')) pathname += 'index.html';
-  const file = resolve(join(root, normalize(pathname)));
-  if (file !== root && !file.startsWith(root + sep)) {
+  const file = resolveInside(pathname);
+  if (file === null) {
     response.writeHead(403).end('forbidden');
     return;
   }
@@ -70,11 +72,11 @@ createServer((request, response) => {
     return;
   }
   response.writeHead(200, {
-    'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
+    'content-type': MIME.get(extname(file).toLowerCase()) ?? 'application/octet-stream',
     'content-length': size,
     'cache-control': 'no-store',
   });
   createReadStream(file).pipe(response);
-}).listen(port, host, () => {
-  console.log(`game/ is on http://${host}:${port}`);
+}).listen(port, '127.0.0.1', () => {
+  console.log(`game/ is on http://localhost:${port}`);
 });

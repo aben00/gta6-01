@@ -1,139 +1,122 @@
-// Keyboard and mouse input. Held keys give movement; one-shot presses
-// (start, interact, punch, horn, pause, advance dialogue, mute) are queued
-// as bit flags and taken once by the loop, so a press between two frames is
-// never lost or counted twice. Mouse drag orbits the camera; clicking the
-// canvas also takes pointer lock on desktop, where mouse movement orbits
-// instead. Releasing a key while the tab is hidden never sends keyup, so a
-// blur clears everything held.
+// Keyboard and mouse input. Held keys give a movement vector each frame;
+// one-shot presses (enter a car, punch, honk, pause, mute, confirm) are
+// queued and taken exactly once by the loop, so a press between two
+// frames is never lost and never counted twice. Dragging the mouse orbits
+// the camera; a short click without a drag is a punch.
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_INTERACT = 2;
-export const ACTION_PUNCH = 4;
-export const ACTION_PAUSE = 8;
-export const ACTION_ADVANCE = 16;
-export const ACTION_MUTE = 32;
-export const ACTION_HORN = 64;
-
-const FORWARD = new Set(['KeyW', 'ArrowUp']);
-const BACK = new Set(['KeyS', 'ArrowDown']);
-const LEFT = new Set(['KeyA', 'ArrowLeft']);
-const RIGHT = new Set(['KeyD', 'ArrowRight']);
-const CONFIRM = new Set(['Enter', 'Space']);
-const INTERACT = new Set(['KeyE']);
-const PUNCH = new Set(['KeyF']);
-const PAUSE = new Set(['KeyP', 'Escape']);
-const MUTE = new Set(['KeyM']);
-const HORN = new Set(['KeyH']);
-const MOVE_KEYS = new Set([...FORWARD, ...BACK, ...LEFT, ...RIGHT]);
+const MOVE_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+const CONFIRM_KEYS = new Set(['Enter', 'Space']);
 
 export function createInput(canvas) {
-  const keys = new Set();
-  let actions = 0;
-  let lookDX = 0;
-  let lookDY = 0;
-  let dragging = false;
-  let lastX = 0;
-  let lastY = 0;
-  let locked = false;
+  const held = new Set();
+  const presses = new Set();
+  let lookDeltaX = 0;
+  let lookDeltaY = 0;
+  let dragStart = null;
+  let draggedFar = false;
+
+  function press(name, event) {
+    if (event && event.repeat) return;
+    presses.add(name);
+  }
 
   window.addEventListener('keydown', (event) => {
-    if (event.repeat) {
-      if (MOVE_KEYS.has(event.code)) event.preventDefault();
-      return;
+    if (MOVE_KEYS.has(event.code) || CONFIRM_KEYS.has(event.code)) event.preventDefault();
+    switch (event.code) {
+      case 'KeyE':
+        press('interact', event);
+        break;
+      case 'KeyF':
+        press('punch', event);
+        break;
+      case 'KeyH':
+        press('horn', event);
+        break;
+      case 'KeyP':
+      case 'Escape':
+        press('pause', event);
+        break;
+      case 'KeyM':
+        press('mute', event);
+        break;
+      case 'Enter':
+        press('confirm', event);
+        break;
+      case 'Space':
+        held.add('Space');
+        break;
+      default:
+        if (MOVE_KEYS.has(event.code)) held.add(event.code);
+        break;
     }
-    keys.add(event.code);
-    if (CONFIRM.has(event.code)) actions |= ACTION_CONFIRM | ACTION_ADVANCE;
-    else if (INTERACT.has(event.code)) actions |= ACTION_INTERACT;
-    else if (PUNCH.has(event.code)) actions |= ACTION_PUNCH;
-    else if (PAUSE.has(event.code)) actions |= ACTION_PAUSE;
-    else if (MUTE.has(event.code)) actions |= ACTION_MUTE;
-    else if (HORN.has(event.code)) actions |= ACTION_HORN;
-    if (MOVE_KEYS.has(event.code) || CONFIRM.has(event.code)) {
-      event.preventDefault();
-    }
+    if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') held.add('Shift');
   });
+
   window.addEventListener('keyup', (event) => {
-    keys.delete(event.code);
+    held.delete(event.code);
+    if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') held.delete('Shift');
+    if (event.code === 'Space') held.delete('Space');
   });
-  // A key released while the tab is hidden never sends keyup: let go of all
-  // of them on blur, and drop any drag in progress with them.
+
+  // A key released while the tab is hidden never sends keyup: let go on blur.
   window.addEventListener('blur', () => {
-    keys.clear();
-    dragging = false;
+    held.clear();
   });
 
   canvas.addEventListener('pointerdown', (event) => {
-    dragging = true;
-    lastX = event.clientX;
-    lastY = event.clientY;
-    if (!locked && canvas.requestPointerLock) {
-      try {
-        canvas.requestPointerLock();
-      } catch {
-        // Pointer lock is a nicety; drag still works without it.
-      }
-    }
-  });
-  window.addEventListener('pointerup', (event) => {
-    dragging = false;
-    // A click (not a drag) while playing is a punch; the loop decides by screen.
-    if (Math.abs(event.clientX - lastX) < 6 && Math.abs(event.clientY - lastY) < 6) {
-      actions |= ACTION_PUNCH | ACTION_ADVANCE;
-    }
+    dragStart = { x: event.clientX, y: event.clientY };
+    draggedFar = false;
   });
   window.addEventListener('pointermove', (event) => {
-    if (locked) {
-      lookDX += event.movementX || 0;
-      lookDY += event.movementY || 0;
-    } else if (dragging) {
-      lookDX += event.clientX - lastX;
-      lookDY += event.clientY - lastY;
-      lastX = event.clientX;
-      lastY = event.clientY;
-    }
+    if (!dragStart) return;
+    const dx = event.clientX - dragStart.x;
+    const dy = event.clientY - dragStart.y;
+    if (Math.abs(dx) + Math.abs(dy) > 6) draggedFar = true;
+    lookDeltaX += event.movementX || dx * 0.2;
+    lookDeltaY += event.movementY || dy * 0.2;
+    dragStart = { x: event.clientX, y: event.clientY };
   });
-  document.addEventListener('pointerlockchange', () => {
-    locked = document.pointerLockElement === canvas;
-    if (!locked) dragging = false;
+  window.addEventListener('pointerup', () => {
+    if (dragStart && !draggedFar) presses.add('punch');
+    dragStart = null;
   });
-  // Mouse wheel zooms the chase camera in and out; the renderer reads it.
-  let wheel = 0;
-  canvas.addEventListener('wheel', (event) => {
-    wheel += event.deltaY;
-    event.preventDefault();
-  }, { passive: false });
+
+  function axis() {
+    const forward = (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0) - (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0);
+    const strafe = (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0) - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0);
+    return { forward, strafe };
+  }
 
   return {
-    /** -1/0/1 forward and strafe, from the held keys, plus run. */
-    move() {
-      const f = keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0;
-      const b = keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0;
-      const l = keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0;
-      const r = keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0;
-      return { forward: f - b, strafe: r - l, run: keys.has('ShiftLeft') || keys.has('ShiftRight') };
+    /** True while this key (a KeyboardEvent.code) is held down. */
+    isHeld(code) {
+      return held.has(code);
     },
-    /** Mouse-look deltas since the last call, in pixels. */
+    /**
+     * The movement the player wants this frame, in camera space:
+     * forward (+1 is away from the camera), strafe (+1 is right),
+     * run while Shift is held, and brake while Space is held.
+     */
+    moveInput() {
+      const { forward, strafe } = axis();
+      return { forward, strafe, run: held.has('Shift'), brake: held.has('Space') };
+    },
+    /** Mouse-orbit accumulated since the last call, in pixels. */
     takeLook() {
-      const dx = lookDX;
-      const dy = lookDY;
-      lookDX = 0;
-      lookDY = 0;
-      return { dx, dy };
-    },
-    /** Wheel delta since the last call. */
-    takeWheel() {
-      const w = wheel;
-      wheel = 0;
-      return w;
-    },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
+      const taken = { x: lookDeltaX, y: lookDeltaY };
+      lookDeltaX = 0;
+      lookDeltaY = 0;
       return taken;
     },
-    isLocked() {
-      return locked;
+    /** True once for each press of `name` since the last call. */
+    takePress(name) {
+      if (!presses.has(name)) return false;
+      presses.delete(name);
+      return true;
+    },
+    /** Drop any queued presses (for example when the screen changes). */
+    clearPresses() {
+      presses.clear();
     },
   };
 }

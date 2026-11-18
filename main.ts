@@ -1,13 +1,13 @@
-// SUNSET HEAT — a make.fun gta6-01 entry (Node 22, standard library only).
-// The game is this directory's game/ folder: plain static files a desktop
-// browser loads offline (game/index.html and its ES modules, three.js vendored
-// under game/vendor/three/, no network request at all). This file copies
-// game/ and screenshots/ from beside it to /output (or $MAKEFUN_OUTPUT_DIR
-// outside the grader's container) and writes /output/dossier.json, the
-// summary the judge reads, with the vendored make.fun library.
+// Sunset Heat — the make.fun entry program (Node 22, standard library
+// only). The game is this directory's game/ folder: plain static files a
+// desktop browser loads offline (game/index.html and its ES modules, with
+// three.js vendored under game/vendor/, no network request). This program
+// hands it in: it copies game/ and screenshots/ from beside this file to
+// /output and writes /output/dossier.json, the summary the judge reads,
+// with the vendored make.fun library.
 //
-// Play it locally with `node serve.ts`, then open http://localhost:8080.
-// Build the hand-in with:
+// Serve it locally with `node serve.ts`, then open http://localhost:8080.
+// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
 import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
@@ -18,24 +18,33 @@ import { buildDossier } from './vendor/makefun-game.ts';
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-/** Count the files under a directory (recursive), for the build report. */
-function countFiles(dir) {
-  let n = 0;
+function countGameFiles(dir) {
+  let files = 0;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    n += entry.isDirectory() ? countFiles(join(dir, entry.name)) : 1;
+    const path = join(dir, entry.name);
+    files += entry.isDirectory() ? countGameFiles(path) : 1;
   }
-  return n;
+  return files;
+}
+
+function describeShots(dir) {
+  return readdirSync(dir)
+    .filter((name) => !name.startsWith('.'))
+    .sort()
+    .map((name) => ({ name, bytes: statSync(join(dir, name)).size }));
 }
 
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
 mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+if (existsSync(join(here, 'screenshots'))) {
+  cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+}
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes the
-// bytes; the others refuse an entry the scorer would refuse (more than 4
-// screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of
-// game files in all, or a path under game/ over 1000 bytes).
+// The scorer's own caps (reference/gate.json): only text_max_bytes shapes
+// the bytes; the others refuse an entry the scorer would refuse (more than
+// 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB
+// of game files, in all, or a path under game/ over 1000 bytes).
 const dossier = buildDossier(out, {
   text_max_bytes: 163840,
   screenshots: { max: 4, max_bytes: 262144 },
@@ -44,12 +53,11 @@ const dossier = buildDossier(out, {
   game_path_max_bytes: 1000,
 });
 writeFileSync(join(out, 'dossier.json'), dossier);
-
-// A short build report, so two runs can be compared at a glance: the dossier
-// must be byte-identical between runs on the same tree.
-const shotFiles = existsSync(join(out, 'screenshots'))
-  ? readdirSync(join(out, 'screenshots')).filter((f) => /\.(png|jpe?g)$/i.test(f)).sort()
-  : [];
 console.log(`sunset-heat: wrote ${join(out, 'dossier.json')} (${dossier.length} bytes)`);
-console.log(`sunset-heat: game/ is ${statSync(join(out, 'game', 'index.html')).size} bytes at index.html (${countFiles(join(out, 'game'))} files)`);
-console.log(`sunset-heat: screenshots/ holds ${shotFiles.length} shot(s): ${shotFiles.map((f) => `${f} (${statSync(join(out, 'screenshots', f)).size} bytes)`).join(', ')}`);
+console.log(
+  `sunset-heat: game/ is ${statSync(join(here, 'game', 'index.html')).size} bytes at index.html (${countGameFiles(join(here, 'game'))} files)`,
+);
+const shots = describeShots(join(here, 'screenshots'));
+console.log(
+  `sunset-heat: screenshots/ holds ${shots.length} shot(s): ${shots.map((s) => `${s.name} (${s.bytes} bytes)`).join(', ')}`,
+);

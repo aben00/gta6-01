@@ -1,26 +1,31 @@
-// Boot and the one loop: input is read every frame, the world advances in
-// fixed 1/60 s steps (several in a slow frame, none in a fast one), and the
-// renderer paints what is there. The game moves between five screens:
-// title, play, paused, busted and story-complete. Money and mission progress
-// are saved to localStorage when a mission is completed or the player is
-// busted; a stash pickup saves too, so a found stash stays found.
+// Sunset Heat — boot and the one loop: input is read every frame, the
+// world advances in fixed 1/60 s steps (several in a slow frame, none in
+// a fast one), and the renderer paints what is there. Four screens: title,
+// play, paused and busted.
 //
-// ?seed=N fixes the city. ?shot=start|cover|chase|mission (with &seed=N)
-// stages that scene instead of running the loop, paints it twice and sets
-// window.__shotReady for a screenshot.
+// ?seed=N fixes the city and the traffic. ?shot=cover|chase|mission|start
+// (with &seed=N) stages that scene instead of running the loop, paints it
+// twice and sets window.__shotReady for a screenshot.
+//
+// window.__sunset is the debug handle the play-test drives: the current
+// screen, the live state, the world (with its debug helpers) and the
+// renderer.
 
-import { COPS, MISSIONS, SAVE_KEY, STEP } from './config.js';
+import { STEP } from './config.js';
 import { createRandom } from './random.js';
-import { createAudio } from './audio.js';
-import { ACTION_ADVANCE, ACTION_CONFIRM, ACTION_MUTE, ACTION_PAUSE, createInput } from './input.js';
-import { createRenderer } from './render.js';
-import { EV_BUSTED, EV_MISSION, EV_PICKUP, EV_STORY, createWorld } from './world.js';
+import {
+  createWorld, EV_BUSTED, EV_CRASH, EV_HITPED, EV_HORN, EV_MISSION, EV_PUNCH,
+  EV_REPAIRED, EV_STASH, EV_STORY, EV_TICK,
+} from './world.js';
+import { createInput } from './input.js';
+import { createRenderer, SCREEN_BUSTED, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
 import { stageShot } from './shots.js';
+import { createAudio } from './audio.js';
 
-/** The longest frame the loop catches up on; a longer stall is dropped, not replayed. */
+/** The longest frame the loop catches up on; a longer stall is dropped. */
 const MAX_FRAME = 0.25;
-const SAVE_VERSION = 1;
-const VERSION = '1.1.0';
+/** Seconds of no mouse input before the camera eases behind the car. */
+const CAM_FOLLOW_IDLE = 2.5;
 
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
@@ -29,83 +34,29 @@ const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() 
 
 const canvas = document.getElementById('game');
 const status = document.getElementById('status');
-const hud = {
-  hud: document.getElementById('hud'),
-  money: document.getElementById('money'),
-  wanted: document.getElementById('wanted'),
-  healthFill: document.getElementById('health-fill'),
-  carBar: document.getElementById('car-bar'),
-  carFill: document.getElementById('car-fill'),
-  carLabel: document.getElementById('car-label'),
-  missionName: document.getElementById('mission-name'),
-  objective: document.getElementById('objective'),
-  stashes: document.getElementById('stashes'),
-  speed: document.getElementById('speed'),
-  timer: document.getElementById('timer'),
-  prompt: document.getElementById('prompt'),
-  dialogBox: document.getElementById('dialog-box'),
-  dialogSpeaker: document.getElementById('dialog-speaker'),
-  dialogText: document.getElementById('dialog-text'),
-  minimap: document.getElementById('minimap'),
+const world = createWorld(createRandom(seed));
+const renderer = createRenderer(canvas, world.layout, createRandom(seed));
+const audio = createAudio();
+
+let screen = SCREEN_TITLE;
+
+window.__sunset = {
+  screen: () => screen,
+  state: world.state,
+  world,
+  renderer,
 };
 
-const random = createRandom(seed);
-const audio = createAudio();
-const world = createWorld(random, audio);
-const renderer = createRenderer(canvas, hud, { highQuality: Boolean(shot) });
-renderer.buildStatic(world.city, random);
-
-function readSave() {
-  try {
-    const raw = window.localStorage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (data.v !== SAVE_VERSION || typeof data.money !== 'number') return null;
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-function writeSave() {
-  try {
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify({
-      v: SAVE_VERSION,
-      money: world.state.money,
-      missionIndex: world.state.missionIndex,
-      storyDone: world.state.storyDone,
-    }));
-  } catch {
-    // Storage can be off (private windows): progress then lasts this visit only.
-  }
-}
-
-function applySave(data) {
-  if (!data) return;
-  world.state.money = data.money;
-  if (data.storyDone) {
-    world.state.storyDone = true;
-    world.state.missionIndex = 3;
-    world.state.objective = 'Story complete — free roam';
-    world.state.marker = null;
-  } else if (data.missionIndex > 0 && data.missionIndex < 3) {
-    world.debug.setMission(data.missionIndex);
-  }
+function announce(message) {
+  status.textContent = message;
 }
 
 function runShot(name) {
   const scene = stageShot(name, world, renderer);
-  // The title overlay is visible in the HTML by default: hide every overlay
-  // for play scenes so the staged frame is the game itself. The title scene
-  // keeps its overlay — it IS the start screen.
-  if (scene.screen !== 'title') {
-    for (const id of ['title-screen', 'paused-screen', 'busted-screen', 'story-screen']) {
-      document.getElementById(id).style.display = 'none';
-    }
-  }
   let painted = 0;
   function paint() {
-    renderer.draw(world.state, scene.screen, STEP, performance.now() / 1000);
+    // A fixed clock keeps the staged frame identical every run.
+    renderer.draw(world.state, scene.screen, STEP, 1.0);
     painted += 1;
     if (painted < 2) requestAnimationFrame(paint);
     else window.__shotReady = true;
@@ -115,236 +66,113 @@ function runShot(name) {
 
 function runGame() {
   const input = createInput(canvas);
-  const saved = readSave();
-  let screen = 'title';
-  let bannerTimer = 0;
   let accumulator = 0;
   let last = performance.now();
-  let lastTickSecond = -1;
+  let lastMouseAt = -99;
+  let elapsed = 0;
 
-  const overlays = {
-    title: document.getElementById('title-screen'),
-    paused: document.getElementById('paused-screen'),
-    busted: document.getElementById('busted-screen'),
-    story: document.getElementById('story-screen'),
-  };
-  const banner = document.getElementById('banner');
-  const bustedFine = document.getElementById('busted-fine');
-  const continueBtn = document.getElementById('continue-btn');
-  const newBtn = document.getElementById('new-btn');
-
-  function showOnly(name) {
-    for (const [key, el] of Object.entries(overlays)) {
-      el.style.display = key === name ? 'flex' : 'none';
-    }
-  }
-
-  function announce(message) {
-    status.textContent = message;
-  }
-
-  function showBanner(text) {
-    banner.textContent = text;
-    banner.style.display = 'block';
-    bannerTimer = 3.2;
-  }
-
-  function startGame(fresh) {
-    if (fresh) {
-      try {
-        window.localStorage.removeItem(SAVE_KEY);
-      } catch {
-        // Ignore storage errors.
-      }
-      world.reset();
-    } else {
-      const data = readSave();
-      world.reset();
-      applySave(data);
-    }
-    accumulator = 0;
-    lastTickSecond = -1;
-    screen = 'play';
-    showOnly(null);
-    announce('Playing. Follow the objective on the left.');
-  }
-
-  function toTitle() {
-    screen = 'title';
-    showOnly('title');
-    continueBtn.style.display = saved ? 'inline-block' : 'none';
-    announce('Sunset Heat. Press Enter to start.');
-  }
-
-  function bustPlayer() {
-    screen = 'busted';
-    showOnly('busted');
-    bustedFine.textContent = `The Solmarina PD fined you $${COPS.bustFine}.`;
-    audio.busted();
-    writeSave();
-    announce('Busted. Press Enter to continue.');
+  function startGame() {
+    screen = SCREEN_PLAY;
+    input.clearPresses();
+    announce('Playing. Steal a car — walk up to one and press E.');
   }
 
   function handleEvents(events) {
-    if (events & EV_MISSION) {
-      const done = MISSIONS[Math.min(world.state.missionIndex, MISSIONS.length) - 1];
-      showBanner(done ? `MISSION COMPLETE  ·  +$${done.reward}` : 'MISSION COMPLETE');
-      writeSave();
+    if (events & EV_BUSTED) {
+      screen = SCREEN_BUSTED;
+      announce('Busted. Press Enter to wake up at the safehouse.');
     }
-    if (events & EV_PICKUP) {
-      showBanner(`STASH FOUND  ·  +$${world.state.lastPickup}`);
-      writeSave();
-    }
-    if (events & EV_STORY) {
-      screen = 'story';
-      showOnly('story');
-      writeSave();
-      announce('Story complete. Solmarina is yours.');
-    }
-    if (events & EV_BUSTED) bustPlayer();
+    if (events & EV_STASH) audio.chime();
+    if (events & EV_MISSION) audio.chime();
+    if (events & EV_STORY) audio.chime();
+    if (events & EV_REPAIRED) audio.click();
+    if (events & (EV_PUNCH | EV_HITPED)) audio.thud();
+    if (events & EV_HORN) audio.horn();
+    if (events & EV_CRASH) audio.crash();
+    if (events & EV_TICK) audio.tick();
   }
 
-  function handleActions() {
-    const actions = input.takeActions();
-    if (actions & ACTION_MUTE) {
-      const muted = audio.toggleMute();
-      showBanner(muted ? 'Sound off (M to turn on)' : 'Sound on');
-    }
-    if (screen === 'title') {
-      if (actions & ACTION_CONFIRM) startGame(false);
+  function handlePresses() {
+    if (input.takePress('mute')) {
+      audio.setMuted(!audio.muted);
       return;
     }
-    if (screen === 'busted') {
-      if (actions & ACTION_CONFIRM) {
-        world.applyBusted();
-        screen = 'play';
-        showOnly(null);
-        announce('Back on the streets.');
-      }
-      return;
-    }
-    if (screen === 'story') {
-      if (actions & ACTION_CONFIRM) {
-        screen = 'play';
-        showOnly(null);
-      }
-      return;
-    }
-    if (actions & ACTION_PAUSE) {
-      if (screen === 'play') {
-        screen = 'paused';
-        showOnly('paused');
-        announce('Paused.');
-      } else if (screen === 'paused') {
-        screen = 'play';
-        showOnly(null);
+    if (input.takePress('confirm')) {
+      if (screen === SCREEN_TITLE) startGame();
+      else if (screen === SCREEN_BUSTED) {
+        world.respawn();
+        screen = SCREEN_PLAY;
+        announce('Back on the street. The safehouse again.');
+      } else if (screen === SCREEN_PAUSED) {
+        screen = SCREEN_PLAY;
         announce('Playing.');
       }
+      return;
     }
-    return actions;
-  }
-
-  function step() {
-    const look = input.takeLook();
-    if (look.dx !== 0 || look.dy !== 0) renderer.orbit(look.dx, look.dy, world.state.elapsed);
-    const wheel = input.takeWheel();
-    if (wheel !== 0) renderer.zoom(wheel);
-    const actions = handleActions() ?? 0;
-    const move = input.move();
-    const events = world.step(STEP, move, { camYaw: renderer.camYaw }, actions);
-    handleEvents(events);
-    // The delivery timer ticks its last ten seconds, one blip per second.
-    const timer = world.state.missionTimer;
-    if (timer > 0 && timer <= 10) {
-      const whole = Math.ceil(timer);
-      if (whole !== lastTickSecond) {
-        lastTickSecond = whole;
-        audio.tick();
+    if (input.takePress('pause')) {
+      if (screen === SCREEN_PLAY) {
+        screen = SCREEN_PAUSED;
+        announce('Paused.');
+      } else if (screen === SCREEN_PAUSED) {
+        screen = SCREEN_PLAY;
+        announce('Playing.');
       }
-    } else {
-      lastTickSecond = -1;
+      return;
     }
-    audio.update(STEP, {
-      driving: !world.state.player.onFoot,
-      speedRatio: Math.abs(world.state.player.car ? world.state.player.car.speed : 0) / 30,
-      throttle: world.state.player.throttle,
-      wanted: world.state.wanted,
-      copDistance: world.nearestCopDistance(),
-    });
-    if (bannerTimer > 0) {
-      bannerTimer -= STEP;
-      if (bannerTimer <= 0) banner.style.display = 'none';
+    if (screen !== SCREEN_PLAY) return;
+    if (input.takePress('interact')) {
+      const events = world.interact();
+      handleEvents(events);
     }
+    if (input.takePress('punch')) handleEvents(world.punch());
+    if (input.takePress('horn')) handleEvents(world.horn());
   }
 
   function frame(now) {
     requestAnimationFrame(frame);
-    accumulator += Math.min((now - last) / 1000, MAX_FRAME);
+    const frameSeconds = Math.min((now - last) / 1000, MAX_FRAME);
     last = now;
-    if (screen === 'title') {
-      while (accumulator >= STEP) {
-        world.step(STEP, { forward: 0, strafe: 0, run: false }, { camYaw: renderer.camYaw }, 0);
-        accumulator -= STEP;
-      }
-      handleActions();
-    } else if (screen === 'play') {
-      while (accumulator >= STEP && screen === 'play') {
-        step();
-        accumulator -= STEP;
-      }
-    } else {
-      accumulator = 0;
-      handleActions();
+    accumulator += frameSeconds;
+    elapsed += frameSeconds;
+
+    const look = input.takeLook();
+    if (look.x !== 0 || look.y !== 0) {
+      renderer.camYaw -= look.x * 0.0045;
+      lastMouseAt = elapsed;
+    } else if (!world.state.player.onFoot && elapsed - lastMouseAt > CAM_FOLLOW_IDLE) {
+      // Hands off the mouse while driving: ease the camera behind the car.
+      let diff = world.state.player.yaw - renderer.camYaw;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      renderer.camYaw += diff * Math.min(1, frameSeconds * 1.4);
     }
-    renderer.draw(world.state, screen, STEP, now / 1000);
+
+    handlePresses();
+    while (accumulator >= STEP) {
+      accumulator -= STEP;
+      if (screen === SCREEN_TITLE) {
+        world.step(STEP, { forward: 0, strafe: 0, run: false }, { camYaw: 0 }, elapsed);
+      } else if (screen === SCREEN_PLAY) {
+        const events = world.step(STEP, input.moveInput(), { camYaw: renderer.camYaw }, elapsed);
+        handleEvents(events);
+      }
+    }
+    audio.update(world.state);
+    renderer.draw(world.state, screen, STEP, elapsed);
   }
 
-  // Leaving the tab pauses a running game rather than letting the cops close in unseen.
+  document.getElementById('start-button').addEventListener('click', () => {
+    audio.setMuted(audio.muted);
+    if (screen === SCREEN_TITLE) startGame();
+  });
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === 'play') {
-      screen = 'paused';
-      showOnly('paused');
+    if (document.hidden && screen === SCREEN_PLAY) {
+      screen = SCREEN_PAUSED;
       announce('Paused.');
     }
   });
 
-  // Audio needs a user gesture before it may start.
-  window.addEventListener('pointerdown', () => audio.unlock(), { passive: true });
-  window.addEventListener('keydown', () => audio.unlock());
-
-  newBtn.addEventListener('click', () => {
-    audio.unlock();
-    startGame(true);
-  });
-  continueBtn.addEventListener('click', () => {
-    audio.unlock();
-    startGame(false);
-  });
-  document.getElementById('resume-btn').addEventListener('click', () => {
-    screen = 'play';
-    showOnly(null);
-  });
-  document.getElementById('busted-btn').addEventListener('click', () => {
-    world.applyBusted();
-    screen = 'play';
-    showOnly(null);
-  });
-  document.getElementById('story-btn').addEventListener('click', () => {
-    screen = 'play';
-    showOnly(null);
-  });
-
-  // For play-tests and debugging: the live state, read-only from the console.
-  window.__sunset = {
-    version: VERSION,
-    world,
-    renderer,
-    screen: () => screen,
-    state: world.state,
-  };
-
-  toTitle();
-  announce('Sunset Heat. Press Enter to start.');
+  announce('Sunset Heat. Press Enter or START ENGINE to play.');
   requestAnimationFrame(frame);
 }
 
