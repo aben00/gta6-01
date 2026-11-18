@@ -10,13 +10,22 @@
 // Build the hand-in with:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { cpSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+
+/** Count the files under a directory (recursive), for the build report. */
+function countFiles(dir) {
+  let n = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    n += entry.isDirectory() ? countFiles(join(dir, entry.name)) : 1;
+  }
+  return n;
+}
 
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
@@ -38,5 +47,9 @@ writeFileSync(join(out, 'dossier.json'), dossier);
 
 // A short build report, so two runs can be compared at a glance: the dossier
 // must be byte-identical between runs on the same tree.
+const shotFiles = existsSync(join(out, 'screenshots'))
+  ? readdirSync(join(out, 'screenshots')).filter((f) => /\.(png|jpe?g)$/i.test(f)).sort()
+  : [];
 console.log(`sunset-heat: wrote ${join(out, 'dossier.json')} (${dossier.length} bytes)`);
-console.log(`sunset-heat: game/ is ${statSync(join(out, 'game', 'index.html')).size} bytes at index.html`);
+console.log(`sunset-heat: game/ is ${statSync(join(out, 'game', 'index.html')).size} bytes at index.html (${countFiles(join(out, 'game'))} files)`);
+console.log(`sunset-heat: screenshots/ holds ${shotFiles.length} shot(s): ${shotFiles.map((f) => `${f} (${statSync(join(out, 'screenshots', f)).size} bytes)`).join(', ')}`);

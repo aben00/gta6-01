@@ -1,8 +1,10 @@
-// Keyboard and mouse input. Held keys give movement; one-shot presses (start,
-// interact, punch, pause, advance dialogue) are queued as bit flags and taken
-// once by the loop, so a press between two frames is never lost or counted
-// twice. Mouse drag orbits the camera; clicking the canvas also takes pointer
-// lock on desktop, where mouse movement orbits instead.
+// Keyboard and mouse input. Held keys give movement; one-shot presses
+// (start, interact, punch, horn, pause, advance dialogue, mute) are queued
+// as bit flags and taken once by the loop, so a press between two frames is
+// never lost or counted twice. Mouse drag orbits the camera; clicking the
+// canvas also takes pointer lock on desktop, where mouse movement orbits
+// instead. Releasing a key while the tab is hidden never sends keyup, so a
+// blur clears everything held.
 
 export const ACTION_CONFIRM = 1;
 export const ACTION_INTERACT = 2;
@@ -10,6 +12,7 @@ export const ACTION_PUNCH = 4;
 export const ACTION_PAUSE = 8;
 export const ACTION_ADVANCE = 16;
 export const ACTION_MUTE = 32;
+export const ACTION_HORN = 64;
 
 const FORWARD = new Set(['KeyW', 'ArrowUp']);
 const BACK = new Set(['KeyS', 'ArrowDown']);
@@ -20,6 +23,8 @@ const INTERACT = new Set(['KeyE']);
 const PUNCH = new Set(['KeyF']);
 const PAUSE = new Set(['KeyP', 'Escape']);
 const MUTE = new Set(['KeyM']);
+const HORN = new Set(['KeyH']);
+const MOVE_KEYS = new Set([...FORWARD, ...BACK, ...LEFT, ...RIGHT]);
 
 export function createInput(canvas) {
   const keys = new Set();
@@ -33,7 +38,7 @@ export function createInput(canvas) {
 
   window.addEventListener('keydown', (event) => {
     if (event.repeat) {
-      if (FORWARD.has(event.code) || BACK.has(event.code) || LEFT.has(event.code) || RIGHT.has(event.code)) event.preventDefault();
+      if (MOVE_KEYS.has(event.code)) event.preventDefault();
       return;
     }
     keys.add(event.code);
@@ -42,14 +47,16 @@ export function createInput(canvas) {
     else if (PUNCH.has(event.code)) actions |= ACTION_PUNCH;
     else if (PAUSE.has(event.code)) actions |= ACTION_PAUSE;
     else if (MUTE.has(event.code)) actions |= ACTION_MUTE;
-    if (FORWARD.has(event.code) || BACK.has(event.code) || LEFT.has(event.code) || RIGHT.has(event.code) || CONFIRM.has(event.code)) {
+    else if (HORN.has(event.code)) actions |= ACTION_HORN;
+    if (MOVE_KEYS.has(event.code) || CONFIRM.has(event.code)) {
       event.preventDefault();
     }
   });
   window.addEventListener('keyup', (event) => {
     keys.delete(event.code);
   });
-  // A key released while the tab is hidden never sends keyup: let go of all of them on blur.
+  // A key released while the tab is hidden never sends keyup: let go of all
+  // of them on blur, and drop any drag in progress with them.
   window.addEventListener('blur', () => {
     keys.clear();
     dragging = false;
@@ -97,7 +104,7 @@ export function createInput(canvas) {
   }, { passive: false });
 
   return {
-    /** -1/0/1 forward and strafe, from the held keys. */
+    /** -1/0/1 forward and strafe, from the held keys, plus run. */
     move() {
       const f = keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0;
       const b = keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0;

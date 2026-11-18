@@ -17,14 +17,19 @@
   #wanted { font-size: 17px; font-weight: 700; letter-spacing: 2px; margin-top: 2px; }
   #health-bar { margin-top: 8px; height: 9px; background: rgba(255,255,255,0.16); border-radius: 5px; overflow: hidden; }
   #health-fill { height: 100%; width: 100%; background: #4caf50; border-radius: 5px; transition: width 0.2s; }
+  #car-bar { margin-top: 6px; height: 9px; background: rgba(255,255,255,0.16); border-radius: 5px; overflow: hidden; display: none; }
+  #car-fill { height: 100%; width: 100%; background: #4caf50; border-radius: 5px; transition: width 0.2s; }
+  .bar-label { font-size: 10px; font-weight: 800; letter-spacing: 2px; color: rgba(238,241,245,0.6); margin-top: 5px; }
   #minimap-wrap { position: absolute; top: 14px; right: 14px; padding: 6px; }
   #minimap { display: block; width: 180px; height: 180px; border-radius: 6px; }
   #objective-box { position: absolute; left: 14px; bottom: 14px; padding: 10px 14px; max-width: 420px; }
   #mission-name { font-size: 12px; font-weight: 800; letter-spacing: 2px; color: #ffd23c; }
   #objective { font-size: 17px; font-weight: 600; margin-top: 3px; }
   #timer { font-size: 20px; font-weight: 800; margin-top: 4px; color: #ffd23c; }
+  #stashes { font-size: 12px; font-weight: 700; letter-spacing: 1px; color: #ffd23c; margin-top: 4px; }
   #speed { position: absolute; right: 16px; bottom: 16px; font-size: 34px; font-weight: 800; text-shadow: 0 2px 8px rgba(0,0,0,0.7); }
   #hint { position: absolute; right: 16px; bottom: 64px; font-size: 12px; color: rgba(238,241,245,0.75); text-shadow: 0 1px 4px rgba(0,0,0,0.8); text-align: right; }
+  #prompt { position: absolute; left: 50%; bottom: 210px; transform: translateX(-50%); padding: 8px 16px; font-size: 15px; font-weight: 700; color: #ffd23c; display: none; white-space: nowrap; }
   #dialog-box { position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%); width: min(620px, 86vw); padding: 12px 18px; display: none; }
   #dialog-speaker { font-size: 12px; font-weight: 800; letter-spacing: 2px; color: #ff9a5c; }
   #dialog-text { font-size: 17px; margin-top: 4px; line-height: 1.45; }
@@ -57,16 +62,21 @@
   <div id="top-left" class="panel">
     <div id="money">$50</div>
     <div id="wanted">☆☆☆☆☆</div>
+    <div class="bar-label">HEALTH</div>
     <div id="health-bar"><div id="health-fill"></div></div>
+    <div id="car-bar"><div id="car-fill"></div></div>
+    <div class="bar-label" id="car-label" style="display:none">CAR</div>
   </div>
   <div id="minimap-wrap" class="panel"><canvas id="minimap" width="180" height="180"></canvas></div>
   <div id="objective-box" class="panel">
     <div id="mission-name">1 · First Wheels</div>
     <div id="objective">Steal a car — walk up to one and press E</div>
     <div id="timer"></div>
+    <div id="stashes">STASHES 0/8</div>
   </div>
   <div id="speed"></div>
-  <div id="hint">WASD move · E enter car · F punch · Shift run<br>Drag mouse to look · P pause · M mute</div>
+  <div id="hint">WASD move · E enter car · F punch · H horn · Shift run<br>Drag mouse to look · P pause · M mute</div>
+  <div id="prompt" class="panel"></div>
   <div id="dialog-box" class="panel">
     <div id="dialog-speaker">MARCO</div>
     <div id="dialog-text"></div>
@@ -78,10 +88,12 @@
   <h1>SUNSET HEAT</h1>
   <h2>SOLMARINA</h2>
   <p>An open-world crime story in a coastal city at dusk. Steal cars, outrun
-  the Solmarina PD, and run three jobs for Marco — before the sun goes down.</p>
+  the Solmarina PD, and run three jobs for Marco — before the sun goes down.
+  Eight cash stashes are hidden around the city; the safehouse garage fixes
+  a bent car for free.</p>
   <div class="keys">
-    <b>WASD</b> move / drive &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>E</b> enter / steal car<br>
-    <b>F</b> / click punch &nbsp;·&nbsp; <b>Shift</b> run &nbsp;·&nbsp; <b>Space</b> brake &nbsp;·&nbsp; <b>P</b> pause &nbsp;·&nbsp; <b>M</b> mute
+    <b>WASD</b> move / drive &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>E</b> enter / steal car / grab stash<br>
+    <b>F</b> / click punch &nbsp;·&nbsp; <b>H</b> horn &nbsp;·&nbsp; <b>Shift</b> run &nbsp;·&nbsp; <b>Space</b> brake &nbsp;·&nbsp; <b>P</b> pause &nbsp;·&nbsp; <b>M</b> mute
   </div>
   <div>
     <button id="new-btn" class="btn">START ENGINE</button>
@@ -93,6 +105,10 @@
 <div id="paused-screen" class="overlay">
   <h1 style="font-size:52px;">PAUSED</h1>
   <p>Solmarina waits for no one — except right now.</p>
+  <div class="keys">
+    <b>WASD</b> move / drive &nbsp;·&nbsp; <b>E</b> enter car / grab stash &nbsp;·&nbsp; <b>F</b> punch &nbsp;·&nbsp; <b>H</b> horn<br>
+    <b>Shift</b> run &nbsp;·&nbsp; <b>Space</b> brake &nbsp;·&nbsp; <b>Mouse</b> look &nbsp;·&nbsp; <b>M</b> mute &nbsp;·&nbsp; <b>P</b> resume
+  </div>
   <button id="resume-btn" class="btn">RESUME</button>
 </div>
 

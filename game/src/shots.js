@@ -1,11 +1,11 @@
-// The screenshot scenes behind ?shot=start|cover|chase|mission. Each one starts
-// from a fresh world with a fixed seed, places the player in a real reachable
-// state (a mission in progress, a wanted level, cops closing in), then plays
-// the real rules forward for a few seconds with a simple autopilot, so the
-// frame is what a short game really looks like and the same seed always
-// gives the same frame.
+// The screenshot scenes behind ?shot=start|cover|chase|mission. Each one
+// starts from a fresh world with a fixed seed, places the player in a real
+// reachable state (a mission in progress, a wanted level, cops closing in),
+// then plays the real rules forward for a few seconds with a simple
+// autopilot, so the frame is what a short game really looks like and the
+// same seed always gives the same frame.
 
-import { STEP } from './config.js';
+import { COPS, STEP } from './config.js';
 
 function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
@@ -15,10 +15,6 @@ function wrapAngle(a) {
   while (a < -Math.PI) a += Math.PI * 2;
   return a;
 }
-function dist(ax, az, bx, bz) {
-  return Math.hypot(ax - bx, az - bz);
-}
-
 /** Drive toward (tx, tz): full throttle, steering at the target. */
 function driveToward(world, tx, tz) {
   const p = world.state.player;
@@ -26,32 +22,6 @@ function driveToward(world, tx, tz) {
   const desired = Math.atan2(tx - p.x, tz - p.z);
   const steer = clamp(wrapAngle(desired - car.yaw) * 2.2, -1, 1);
   return { forward: 1, strafe: steer, run: false };
-}
-
-/** Run away from the nearest cop or officer. */
-function runAway(world) {
-  const p = world.state.player;
-  let bx = p.x;
-  let bz = p.z - 50;
-  let best = Infinity;
-  for (const car of world.state.cars) {
-    if (car.kind !== 'cop') continue;
-    const d = dist(p.x, p.z, car.x, car.z);
-    if (d < best) {
-      best = d;
-      bx = p.x + (p.x - car.x);
-      bz = p.z + (p.z - car.z);
-    }
-  }
-  for (const off of world.state.officers) {
-    const d = dist(p.x, p.z, off.x, off.z);
-    if (d < best) {
-      best = d;
-      bx = p.x + (p.x - off.x);
-      bz = p.z + (p.z - off.z);
-    }
-  }
-  return { awayX: bx, awayZ: bz };
 }
 
 /** Frame a subject from a three-quarter rear-side view (cinematic shot camera). */
@@ -65,6 +35,7 @@ function frameSubject(renderer, x, z, yaw, back, side, height, ahead) {
     [x + fx * ahead, 1.5, z + fz * ahead],
   );
 }
+
 /** Step the world N fixed steps with a move function; camYaw follows the player. */
 function simulate(world, renderer, seconds, moveFn) {
   const steps = Math.round(seconds / STEP);
@@ -89,32 +60,47 @@ export function stageShot(name, world, renderer) {
   if (name === 'cover') {
     // Mission 2, mid-delivery: driving south down the x=60 avenue toward the
     // beach, the sun low over the sea ahead, two stars, two cruisers behind.
+    // The drive runs far enough that the car clears the last buildings and
+    // the beach and the sea open up behind it.
     world.debug.setMission(1);
     world.debug.placeInCar(60, 60, 0);
     world.state.player.car.color = 0xc23b2e; // bright red hero car for the cover
     world.debug.setWanted(2);
     world.debug.spawnCops(2);
     renderer.setCamYaw(0);
-    simulate(world, renderer, 3.5, () => driveToward(world, 60, 185));
+    simulate(world, renderer, 4, () => driveToward(world, 60, 195));
     const p2 = world.state.player;
-    frameSubject(renderer, p2.x, p2.z, p2.car.yaw, 9, 2, 4, 10);
+    // The briefing dialog and the context prompt would sit on top of the
+    // car in this framing: clear them for the shot (the timer, objective
+    // and wanted stars still show what the scene is).
+    world.state.dialog = null;
+    world.state.prompt = null;
+    frameSubject(renderer, p2.x, p2.z, p2.car.yaw, 11, 3, 7, 6);
     return { screen: 'play' };
   }
 
   if (name === 'chase') {
-    // On foot, three stars, officers closing in — run for the side streets.
+    // On foot, three stars, running south down the x=0 avenue toward the
+    // beach with the cruisers closing in from behind — a straight street,
+    // so the camera has a clear view of the player and the chase.
     world.debug.placePlayer(0, 60, 0);
     world.debug.setWanted(3);
     world.debug.spawnCops(3);
-    renderer.setCamYaw(0);
-    simulate(world, renderer, 4, () => {
-      const away = runAway(world);
-      const desired = Math.atan2(away.awayX - p.x, away.awayZ - p.z);
-      // Turn the camera to face the run direction, then run forward.
-      renderer.setCamYaw(desired);
-      return { forward: 1, strafe: 0, run: true };
+    // Line the cruisers up behind the player on the same avenue, far enough
+    // back that four seconds of chase leaves them in the frame behind the
+    // runner instead of on top of them.
+    const cops = world.state.cars.filter((c) => c.kind === 'cop');
+    cops.forEach((cop, i) => {
+      cop.x = (i - 1) * 8;
+      cop.z = 60 - 60 - i * 14;
+      cop.yaw = 0;
+      cop.speed = COPS.chaseSpeed * 0.85;
     });
-    frameSubject(renderer, p.x, p.z, p.yaw, 7, 3, 2.6, 6);
+    renderer.setCamYaw(0);
+    simulate(world, renderer, 4, () => ({ forward: 1, strafe: 0, run: true }));
+    // The "get in the car" prompt would sit on the runner: clear it.
+    world.state.prompt = null;
+    frameSubject(renderer, p.x, p.z, p.yaw, 6.5, 2, 3, 6);
     return { screen: 'play' };
   }
 

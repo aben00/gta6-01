@@ -1,11 +1,12 @@
 // SUNSET HEAT — drawing only: the three.js scene, the chase camera, the DOM
 // HUD and the minimap. The world state in, pixels out. Static city geometry
-// (palms, lamps, roofs) is merged into single meshes; buildings keep their
-// facade texture; cars and people are small merged box characters so a frame
-// stays cheap in software rendering.
+// (palms, lamps, roofs, pier, boats) is merged into single meshes; buildings
+// keep their facade texture; cars and people are small merged box characters
+// so a frame stays cheap in software rendering. Damage smoke and the gold
+// stash diamonds are the only per-frame effects beyond the cars and people.
 
 import * as THREE from 'three';
-import { CITY, MISSIONS, PALETTE } from './config.js';
+import { CITY, DAMAGE, MISSIONS, PALETTE, SAFEHOUSE } from './config.js';
 import { makeFacadeTexture, makeGroundTexture } from './city.js';
 
 const TAU = Math.PI * 2;
@@ -58,8 +59,20 @@ function box(w, h, d, x, y, z, color, ry = 0) {
   return { geo: g, color };
 }
 
-function css(n) {
-  return `#${n.toString(16).padStart(6, '0')}`;
+/** A radial glow texture drawn once on a canvas, for the sun and the smoke. */
+function makeGlowTexture(inner, mid, outer) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const g = canvas.getContext('2d');
+  const grad = g.createRadialGradient(128, 128, 8, 128, 128, 128);
+  grad.addColorStop(0, inner);
+  grad.addColorStop(0.25, mid);
+  grad.addColorStop(0.6, outer);
+  grad.addColorStop(1, 'rgba(255, 110, 60, 0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 256, 256);
+  return new THREE.CanvasTexture(canvas);
 }
 
 /** A low-poly person: torso+head+arms in one mesh, legs separate so they swing. */
@@ -115,7 +128,7 @@ export function createRenderer(canvas, hud, opts = {}) {
   const software = !opts.highQuality && isSoftwareGL();
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: !software });
-  renderer.setPixelRatio(software ? 0.66 : Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(software ? 0.55 : Math.min(window.devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -142,18 +155,7 @@ export function createRenderer(canvas, hud, opts = {}) {
   scene.add(sun.target);
 
   // The setting sun over the sea: a glowing sprite low on the horizon.
-  const glowCanvas = document.createElement('canvas');
-  glowCanvas.width = 256;
-  glowCanvas.height = 256;
-  const gg = glowCanvas.getContext('2d');
-  const grad = gg.createRadialGradient(128, 128, 8, 128, 128, 128);
-  grad.addColorStop(0, 'rgba(255, 220, 160, 1)');
-  grad.addColorStop(0.25, 'rgba(255, 170, 90, 0.85)');
-  grad.addColorStop(0.6, 'rgba(255, 110, 60, 0.28)');
-  grad.addColorStop(1, 'rgba(255, 110, 60, 0)');
-  gg.fillStyle = grad;
-  gg.fillRect(0, 0, 256, 256);
-  const glowTex = new THREE.CanvasTexture(glowCanvas);
+  const glowTex = makeGlowTexture('rgba(255, 220, 160, 1)', 'rgba(255, 170, 90, 0.85)', 'rgba(255, 110, 60, 0.28)');
   const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false, fog: false }));
   sunSprite.position.set(-140, 34, 430);
   sunSprite.scale.set(260, 260, 1);
@@ -163,17 +165,32 @@ export function createRenderer(canvas, hud, opts = {}) {
   sunCore.scale.set(90, 90, 1);
   scene.add(sunCore);
 
+  // Grey puffs for damaged-car exhaust smoke, sharing one soft texture.
+  const smokeTex = makeGlowTexture('rgba(160, 160, 170, 0.55)', 'rgba(140, 140, 150, 0.35)', 'rgba(120, 120, 130, 0.12)');
+  const smokePool = [];
+  for (let i = 0; i < 20; i += 1) {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, transparent: true, opacity: 0, depthWrite: false, color: PALETTE.smoke }));
+    sprite.visible = false;
+    scene.add(sprite);
+    smokePool.push({ sprite, life: 1, x: 0, y: 0, z: 0 });
+  }
+  let smokeTimer = 0;
+
+  // One shared octahedron + material for all eight stash diamonds.
+  const stashDiamondGeo = new THREE.OctahedronGeometry(0.9);
+  const stashDiamondMat = new THREE.MeshBasicMaterial({ color: PALETTE.stashGold });
+
   personMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
   pantsMaterial = new THREE.MeshLambertMaterial({ color: 0x2a2a33 });
 
   // --- static city ---------------------------------------------------------
   let cityGroup = null;
-  let buildingMeshes = [];
   let beacon = null;
   let beaconDiamond = null;
   let groundTexRef = null;
   const carMeshes = new Map(); // car id -> { group, lightBar }
   const personMeshes = new Map(); // object -> meshes
+  const stashMeshes = new Map(); // stash object -> { group, diamond }
   let playerMeshes = null;
 
   function buildStatic(city, random) {
@@ -182,7 +199,6 @@ export function createRenderer(canvas, hud, opts = {}) {
       cityGroup = null;
     }
     cityGroup = new THREE.Group();
-    buildingMeshes = [];
 
     // Ground: one big textured plane.
     const groundTex = new THREE.CanvasTexture(makeGroundTexture(random));
@@ -205,12 +221,15 @@ export function createRenderer(canvas, hud, opts = {}) {
     sea.position.set(0, 0.12, (CITY.waterZ + CITY.half) / 2 - 4);
     cityGroup.add(sea);
 
-    // Buildings, one mesh each so the facade texture can tile by height.
+    // Buildings, merged into one mesh: the facade texture tiles by height
+    // (uv scaled per building) and each building's tint rides as a vertex
+    // colour, so ~70 draw calls become one. The roofs merge the same way.
     const facadeTex = new THREE.CanvasTexture(makeFacadeTexture(random));
     facadeTex.wrapS = THREE.RepeatWrapping;
     facadeTex.wrapT = THREE.RepeatWrapping;
     facadeTex.colorSpace = THREE.SRGBColorSpace;
     const roofParts = [];
+    const buildingParts = [];
     for (const b of city.buildings) {
       const geo = new THREE.BoxGeometry(b.w, b.h, b.d);
       const uv = geo.attributes.uv;
@@ -218,14 +237,16 @@ export function createRenderer(canvas, hud, opts = {}) {
         uv.setXY(i, uv.getX(i) * (b.w / 11), uv.getY(i) * (b.h / 11));
       }
       geo.translate(b.x, b.h / 2, b.z);
-      const mat = new THREE.MeshLambertMaterial({ map: facadeTex, color: b.color });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      cityGroup.add(mesh);
-      buildingMeshes.push(mesh);
+      buildingParts.push({ geo, color: b.color });
       roofParts.push(box(b.w + 0.6, 0.5, b.d + 0.6, b.x, b.h + 0.25, b.z, b.roof));
     }
+    const buildings = new THREE.Mesh(
+      mergeBoxes(buildingParts),
+      new THREE.MeshLambertMaterial({ map: facadeTex, vertexColors: true }),
+    );
+    buildings.castShadow = true;
+    buildings.receiveShadow = true;
+    cityGroup.add(buildings);
     const roofs = new THREE.Mesh(mergeBoxes(roofParts), new THREE.MeshLambertMaterial({ vertexColors: true }));
     roofs.castShadow = true;
     cityGroup.add(roofs);
@@ -251,6 +272,36 @@ export function createRenderer(canvas, hud, opts = {}) {
     }
     const lamps = new THREE.Mesh(mergeBoxes(lampParts), new THREE.MeshLambertMaterial({ vertexColors: true }));
     cityGroup.add(lamps);
+
+    // The pier: a plank deck on posts, reaching from the beach into the sea.
+    const pierParts = [];
+    for (let z = city.pier.z0; z < city.pier.z1; z += 2) {
+      pierParts.push(box(city.pier.width, 0.3, 2, city.pier.x, 0.45, z + 1, PALETTE.pierWood));
+    }
+    for (let z = city.pier.z0 + 3; z < city.pier.z1; z += 6) {
+      pierParts.push(box(0.35, 1.8, 0.35, city.pier.x - city.pier.width / 2 + 0.3, -0.3, z, 0x5a4028));
+      pierParts.push(box(0.35, 1.8, 0.35, city.pier.x + city.pier.width / 2 - 0.3, -0.3, z, 0x5a4028));
+    }
+    const pier = new THREE.Mesh(mergeBoxes(pierParts), new THREE.MeshLambertMaterial({ vertexColors: true }));
+    cityGroup.add(pier);
+
+    // Boats on the sea: hull + cabin, merged into one mesh.
+    const boatParts = [];
+    for (const boat of city.boats) {
+      const c = Math.cos(boat.yaw);
+      const s = Math.sin(boat.yaw);
+      // Hull as one rotated box, then moved into place (rotate first, then translate).
+      const hull = box(boat.len, 1.0, 2.6, 0, 0, 0, PALETTE.boatHull, boat.yaw);
+      hull.geo.translate(boat.x, 0.4, boat.z);
+      boatParts.push(hull);
+      const cabin = box(boat.len * 0.45, 0.9, 1.6, 0, 0, 0, PALETTE.boatTrim, boat.yaw);
+      const cx = boat.x - s * boat.len * 0.08;
+      const cz = boat.z - c * boat.len * 0.08;
+      cabin.geo.translate(cx, 1.3, cz);
+      boatParts.push(cabin);
+    }
+    const boats = new THREE.Mesh(mergeBoxes(boatParts), new THREE.MeshLambertMaterial({ vertexColors: true }));
+    cityGroup.add(boats);
 
     // Mission beacon: a light pillar and a floating diamond, moved per frame.
     beacon = new THREE.Mesh(
@@ -286,6 +337,11 @@ export function createRenderer(canvas, hud, opts = {}) {
       box(0.34, 0.18, 0.08, -0.6, 0.66, -2.21, 0xcc2222), // taillights
       box(0.34, 0.18, 0.08, 0.6, 0.66, -2.21, 0xcc2222),
     ];
+    if (car.taxi) {
+      // Roof sign: a yellow block with a dark cap, so taxis read at a glance.
+      parts.push(box(0.95, 0.22, 0.55, 0, 1.58, -0.25, 0xe8b820));
+      parts.push(box(0.95, 0.1, 0.55, 0, 1.73, -0.25, 0x111111));
+    }
     const mesh = new THREE.Mesh(mergeBoxes(parts), new THREE.MeshLambertMaterial({ vertexColors: true }));
     mesh.castShadow = true;
     group.add(mesh);
@@ -353,7 +409,6 @@ export function createRenderer(canvas, hud, opts = {}) {
     const p = state.player;
     if (!playerMeshes) {
       playerMeshes = makePerson(0x2e6ec2, 0xd8a075, 0x2a2a33);
-      // The player's right arm swings for the punch: rebuild it as its own mesh.
       scene.add(playerMeshes.group);
     }
     playerMeshes.group.visible = p.onFoot;
@@ -363,8 +418,7 @@ export function createRenderer(canvas, hud, opts = {}) {
       const swing = p.moving ? Math.sin(p.walkPhase) * 0.6 : 0;
       playerMeshes.legL.rotation.x = swing;
       playerMeshes.legR.rotation.x = -swing;
-      // Punch: right arm (index 3 of the torso geometry is merged; fake it by
-      // tilting the whole torso slightly forward during the swing).
+      // Punch: the torso leans into the swing (the right arm is merged in).
       playerMeshes.torso.rotation.x = p.punchAnim > 0 ? -0.35 : 0;
     }
     for (const ped of state.peds) {
@@ -380,6 +434,67 @@ export function createRenderer(canvas, hud, opts = {}) {
         scene.remove(entry.group);
         personMeshes.delete(key);
       }
+    }
+  }
+
+  // --- stashes --------------------------------------------------------------
+  function syncStashes(state) {
+    const seen = new Set();
+    for (let i = 0; i < state.stashes.length; i += 1) {
+      const stash = state.stashes[i];
+      if (stash.taken) continue;
+      seen.add(stash);
+      let entry = stashMeshes.get(stash);
+      if (!entry) {
+        // One spinning gold diamond per stash; no glow sprite, so the eight
+        // stashes cost eight tiny draw calls and no extra overdraw.
+        const group = new THREE.Group();
+        const diamond = new THREE.Mesh(stashDiamondGeo, stashDiamondMat);
+        group.add(diamond);
+        scene.add(group);
+        entry = { group, diamond };
+        stashMeshes.set(stash, entry);
+      }
+      entry.group.position.set(stash.x, 1.3 + Math.sin(state.elapsed * 2 + i * 1.7) * 0.25, stash.z);
+      entry.diamond.rotation.y = state.elapsed * 1.5;
+    }
+    for (const [stash, entry] of stashMeshes) {
+      if (!seen.has(stash)) {
+        scene.remove(entry.group);
+        stashMeshes.delete(stash);
+      }
+    }
+  }
+
+  // --- damage smoke ---------------------------------------------------------
+  function updateSmoke(state, dt) {
+    const p = state.player;
+    const car = !p.onFoot ? p.car : null;
+    smokeTimer -= dt;
+    if (car && car.dmg > DAMAGE.smokeAt && Math.abs(car.speed) > 2 && smokeTimer <= 0) {
+      smokeTimer = 0.09;
+      const puff = smokePool.find((s) => s.life >= 1);
+      if (puff) {
+        puff.life = 0;
+        const fx = Math.sin(car.yaw);
+        const fz = Math.cos(car.yaw);
+        puff.x = car.x - fx * 2.3;
+        puff.y = 0.7;
+        puff.z = car.z - fz * 2.3;
+        puff.sprite.visible = true;
+      }
+    }
+    for (const puff of smokePool) {
+      if (puff.life >= 1) {
+        puff.sprite.visible = false;
+        continue;
+      }
+      puff.life = Math.min(1, puff.life + dt / 1.2);
+      puff.y += dt * 1.6;
+      const scale = 1 + puff.life * 3.2;
+      puff.sprite.scale.set(scale, scale, 1);
+      puff.sprite.position.set(puff.x, puff.y, puff.z);
+      puff.sprite.material.opacity = 0.34 * (1 - puff.life);
     }
   }
 
@@ -401,19 +516,23 @@ export function createRenderer(canvas, hud, opts = {}) {
     camDist = Math.max(6, Math.min(17, camDist + delta * 0.01));
   }
 
+  /** Lift a camera position out of any building it would sit inside. */
+  function liftOutOfBuildings(x, y, z, buildings) {
+    let cy = y;
+    for (let i = 0; i < buildings.length; i += 1) {
+      const b = buildings[i];
+      if (x > b.x - b.hw - 0.5 && x < b.x + b.hw + 0.5 && z > b.z - b.hd - 0.5 && z < b.z + b.hd + 0.5 && cy < b.h + 1) {
+        cy = b.h + 1.5;
+      }
+    }
+    return cy;
+  }
+
   function updateCamera(state, screen, dt, now) {
     if (freeCamera) {
-      let cx = freeCamera.pos[0];
-      let cy = freeCamera.pos[1];
-      let cz = freeCamera.pos[2];
-      // Keep a staged camera out of buildings, like the follow camera.
-      const buildings = state.city.buildings;
-      for (let i = 0; i < buildings.length; i += 1) {
-        const b = buildings[i];
-        if (cx > b.x - b.hw - 0.5 && cx < b.x + b.hw + 0.5 && cz > b.z - b.hd - 0.5 && cz < b.z + b.hd + 0.5 && cy < b.h + 1) {
-          cy = b.h + 1.5;
-        }
-      }
+      const cx = freeCamera.pos[0];
+      const cz = freeCamera.pos[2];
+      const cy = liftOutOfBuildings(cx, freeCamera.pos[1], cz, state.city.buildings);
       camera.position.set(cx, cy, cz);
       camera.lookAt(freeCamera.target[0], freeCamera.target[1], freeCamera.target[2]);
       return;
@@ -446,14 +565,7 @@ export function createRenderer(canvas, hud, opts = {}) {
     let cx = lookX - backX * flat;
     let cy = lookY + height;
     let cz = lookZ - backZ * flat;
-    // Keep the camera out of buildings.
-    const buildings = state.city.buildings;
-    for (let i = 0; i < buildings.length; i += 1) {
-      const b = buildings[i];
-      if (cx > b.x - b.hw - 0.5 && cx < b.x + b.hw + 0.5 && cz > b.z - b.hd - 0.5 && cz < b.z + b.hd + 0.5 && cy < b.h + 1) {
-        cy = b.h + 1.5;
-      }
-    }
+    cy = liftOutOfBuildings(cx, cy, cz, state.city.buildings);
     cx = Math.max(-CITY.half, Math.min(CITY.half, cx));
     cz = Math.max(-CITY.half, Math.min(CITY.half, cz));
     cy = Math.max(1.4, cy);
@@ -476,7 +588,7 @@ export function createRenderer(canvas, hud, opts = {}) {
   // --- HUD ------------------------------------------------------------------
   const minimap = hud.minimap;
   const mctx = minimap.getContext('2d');
-  const cache = { money: null, wanted: null, health: null, objective: null, speed: null, timer: null, dialog: null, mission: null };
+  const cache = { money: null, wanted: null, health: null, cardmg: null, carbar: null, objective: null, speed: null, timer: null, dialog: null, mission: null, stashes: null, prompt: null };
 
   function setText(el, value, key) {
     if (cache[key] !== value) {
@@ -510,6 +622,18 @@ export function createRenderer(canvas, hud, opts = {}) {
       mctx.lineTo(S, px(v));
       mctx.stroke();
     }
+    // Safehouse: a green square with a white edge, always on the map.
+    mctx.fillStyle = '#4caf50';
+    mctx.fillRect(px(SAFEHOUSE[0]) - 4, px(SAFEHOUSE[1]) - 4, 8, 8);
+    mctx.strokeStyle = '#eef1f5';
+    mctx.lineWidth = 1;
+    mctx.strokeRect(px(SAFEHOUSE[0]) - 4, px(SAFEHOUSE[1]) - 4, 8, 8);
+    // Unfound stashes: small gold dots.
+    mctx.fillStyle = '#ffd23c';
+    for (const stash of state.stashes) {
+      if (stash.taken) continue;
+      mctx.fillRect(px(stash.x) - 2, px(stash.z) - 2, 4, 4);
+    }
     // Mission marker.
     if (state.marker) {
       const pulse = 1 + 0.25 * Math.sin(state.elapsed * 5);
@@ -542,6 +666,10 @@ export function createRenderer(canvas, hud, opts = {}) {
     mctx.closePath();
     mctx.fill();
     mctx.restore();
+    // North tick.
+    mctx.fillStyle = '#8b93a3';
+    mctx.font = 'bold 11px sans-serif';
+    mctx.fillText('N', S / 2 - 4, 12);
   }
 
   function updateHud(state, screen) {
@@ -557,9 +685,25 @@ export function createRenderer(canvas, hud, opts = {}) {
       hud.healthFill.style.width = `${healthPct}%`;
       hud.healthFill.style.background = healthPct > 50 ? '#4caf50' : healthPct > 25 ? '#ff9800' : '#f44336';
     }
+    // Car condition bar, only while driving.
+    const driving = !p.onFoot && p.car;
+    if (cache.carbar !== driving) {
+      cache.carbar = driving;
+      hud.carBar.style.display = driving ? 'block' : 'none';
+      hud.carLabel.style.display = driving ? 'block' : 'none';
+    }
+    if (driving) {
+      const carPct = Math.max(0, Math.round((1 - p.car.dmg) * 100));
+      if (cache.cardmg !== carPct) {
+        cache.cardmg = carPct;
+        hud.carFill.style.width = `${carPct}%`;
+        hud.carFill.style.background = carPct > 65 ? '#4caf50' : carPct > 30 ? '#ff9800' : '#f44336';
+      }
+    }
     const mission = MISSIONS[state.missionIndex];
     setText(hud.missionName, mission ? mission.name : 'FREE ROAM', 'mission');
     setText(hud.objective, state.objective, 'objective');
+    setText(hud.stashes, `STASHES ${state.stashesFound}/${state.stashesTotal}`, 'stashes');
     const kmh = state.player.onFoot ? 0 : Math.round(Math.abs(p.car ? p.car.speed : 0) * 3.6);
     setText(hud.speed, p.onFoot ? '' : `${kmh} km/h`, 'speed');
     const timerText = state.missionTimer > 0 ? `⏱ ${Math.ceil(state.missionTimer)}s` : '';
@@ -577,6 +721,12 @@ export function createRenderer(canvas, hud, opts = {}) {
     } else if (cache.dialog !== null) {
       cache.dialog = null;
       hud.dialogBox.style.display = 'none';
+    }
+    // Context prompt: what E does right here, right now.
+    if (cache.prompt !== state.prompt) {
+      cache.prompt = state.prompt;
+      hud.prompt.textContent = state.prompt ?? '';
+      hud.prompt.style.display = state.prompt ? 'block' : 'none';
     }
     hud.hud.style.display = screen === 'play' ? 'block' : 'none';
     drawMinimap(state);
@@ -604,14 +754,14 @@ export function createRenderer(canvas, hud, opts = {}) {
   function applyQuality() {
     if (quality === 1) {
       sun.castShadow = false;
-      renderer.setPixelRatio(software ? 0.66 : 1);
+      renderer.setPixelRatio(software ? 0.55 : 1);
       if (groundTexRef) {
         groundTexRef.anisotropy = 1;
         groundTexRef.needsUpdate = true;
       }
       resize();
     } else if (quality === 2) {
-      renderer.setPixelRatio(software ? 0.5 : 0.66);
+      renderer.setPixelRatio(software ? 0.42 : 0.66);
       resize();
     }
   }
@@ -623,7 +773,9 @@ export function createRenderer(canvas, hud, opts = {}) {
     qTime += nowSeconds - qLast;
     qLast = nowSeconds;
     qFrames += 1;
-    if (qFrames >= 45) {
+    if (qFrames >= 30) {
+      // A 30-frame window adapts within ~6 s even at 5 fps, so a slow
+      // machine steps down before the player notices the stutter.
       const fps = qFrames / Math.max(0.001, qTime);
       qFrames = 0;
       qTime = 0;
@@ -657,6 +809,8 @@ export function createRenderer(canvas, hud, opts = {}) {
       autoQuality(now);
       syncCars(state);
       syncPeople(state);
+      syncStashes(state);
+      updateSmoke(state, dt);
       if (state.marker) {
         beacon.visible = true;
         beaconDiamond.visible = true;

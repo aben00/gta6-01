@@ -1,10 +1,11 @@
-// Solmarina's layout: a road grid, the blocks between the roads, the beach and
-// the sea on the south edge. This file holds data and canvas textures only —
-// no three.js — so the world logic and the renderer can share it. All layout
-// comes from the seeded generator, so one seed is one city.
+// Solmarina's layout: a road grid, the blocks between the roads, the beach
+// and the sea on the south edge, a wooden pier and a few boats out on the
+// water. This file holds data and canvas textures only — no three.js — so
+// the world logic and the renderer can share it. All layout comes from the
+// seeded generator, so one seed is one city.
 
 import { CITY, PALETTE } from './config.js';
-import { randInt, randPick, randRange } from './random.js';
+import { randInt, randPick, randRange, randShuffle } from './random.js';
 
 // Facade colours for the sunset city: warm plaster, brick, teal, sand.
 const FACADE_COLORS = [0xb98a6e, 0x9a7f8a, 0x7f9a8a, 0xc2a878, 0x8a7a9a, 0xa86e5e, 0x6e8a9a, 0xd8c2a0];
@@ -151,7 +152,22 @@ export function makeFacadeTexture(random) {
   return canvas;
 }
 
-/** Buildings, palms and lamps for one seed. Buildings carry their AABB. */
+/** A few boats drifting on the sea, in shuffled order so no two seeds match. */
+function buildBoats(random) {
+  const spots = randShuffle(random, [-170, -110, -40, 30, 90, 175]);
+  const boats = [];
+  for (let i = 0; i < 5; i += 1) {
+    boats.push({
+      x: spots[i] + randRange(random, -8, 8),
+      z: randRange(random, 242, 258),
+      yaw: randRange(random, -0.5, 0.5),
+      len: randRange(random, 6, 9),
+    });
+  }
+  return boats;
+}
+
+/** Buildings, palms, lamps, the pier and the boats for one seed. Buildings carry their AABB. */
 export function buildCity(random) {
   const lines = roadLines();
   const buildings = [];
@@ -201,5 +217,7 @@ export function buildCity(random) {
   for (let x = -180; x <= 180; x += 30) {
     palms.push({ x: x + randRange(random, -4, 4), z: CITY.beachZ - 8 });
   }
-  return { buildings, palms, lamps, carColors: CAR_COLORS };
+  const boats = buildBoats(random);
+  const pier = { x: CITY.pierX, z0: CITY.pierZ0, z1: CITY.pierZ1, width: CITY.pierWidth };
+  return { buildings, palms, lamps, boats, pier, carColors: CAR_COLORS };
 }

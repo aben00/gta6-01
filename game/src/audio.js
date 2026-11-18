@@ -1,11 +1,12 @@
-// Synthesised sound only — no audio files, no network. Everything is WebAudio:
-// an engine hum that follows the car's speed, a two-tone police siren that
-// follows the nearest cruiser, and short one-shot effects (punch, crash,
-// pickup, mission jingle, bust). Audio starts on the first user gesture;
-// until then every call is a safe no-op.
+// Synthesised sound only — no audio files, no network. Everything is
+// WebAudio: an engine hum that follows the car's speed, a two-tone police
+// siren that follows the nearest cruiser, a car horn, and short one-shot
+// effects (punch, crash, pickup, mission jingle, bust, timer tick). Audio
+// starts on the first user gesture; until then every call is a safe no-op.
 
 const ENGINE_BASE = 55;
 const ENGINE_TOP = 210;
+const MASTER_VOLUME = 0.5;
 
 export function createAudio() {
   let ctx = null;
@@ -28,14 +29,15 @@ export function createAudio() {
       if (!AC) return false;
       ctx = new AC();
       master = ctx.createGain();
-      master.gain.value = 0.5;
+      master.gain.value = muted ? 0 : MASTER_VOLUME;
       master.connect(ctx.destination);
-      // Shared noise buffer for crashes and punches.
+      // One shared noise buffer for crashes and punches (decaying white noise).
       const len = Math.floor(ctx.sampleRate * 0.4);
       noiseBuffer = ctx.createBuffer(1, len, ctx.sampleRate);
       const data = noiseBuffer.getChannelData(0);
       for (let i = 0; i < len; i += 1) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
-      // Engine: two detuned saws through a low-pass, always running, gain 0 at rest.
+      // Engine: two detuned oscillators through a low-pass, always running
+      // with gain 0 at rest so there is no start-up click when driving.
       engineOsc = ctx.createOscillator();
       engineOsc.type = 'sawtooth';
       engineOsc.frequency.value = ENGINE_BASE;
@@ -69,12 +71,13 @@ export function createAudio() {
     }
   }
 
-  /** Call from any user gesture (key, click) so the context is allowed to run. */
+  /** Call from any user gesture (key, click) so the context may run. */
   function unlock() {
     if (!ensure()) return;
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
   }
 
+  /** One oscillator note with a quick attack and an exponential tail. */
   function tone(freq, dur, type, vol, when = 0, slideTo = 0) {
     if (!ctx || muted) return;
     const t0 = ctx.currentTime + when;
@@ -92,6 +95,7 @@ export function createAudio() {
     osc.stop(t0 + dur + 0.05);
   }
 
+  /** A burst of the shared noise buffer through a low-pass filter. */
   function noise(dur, vol, filterFreq) {
     if (!ctx || muted) return;
     const src = ctx.createBufferSource();
@@ -113,7 +117,7 @@ export function createAudio() {
     unlock,
     toggleMute() {
       muted = !muted;
-      if (master) master.gain.value = muted ? 0 : 0.5;
+      if (master) master.gain.value = muted ? 0 : MASTER_VOLUME;
       return muted;
     },
     isMuted() {
@@ -171,6 +175,15 @@ export function createAudio() {
     },
     click() {
       tone(700, 0.05, 'sine', 0.18);
+    },
+    /** Two-tone car horn: a major third, short and flat, like a city horn. */
+    horn() {
+      tone(370, 0.22, 'square', 0.14);
+      tone(466, 0.22, 'square', 0.12);
+    },
+    /** The mission timer's last-seconds tick. */
+    tick() {
+      tone(1250, 0.05, 'sine', 0.14);
     },
   };
 }

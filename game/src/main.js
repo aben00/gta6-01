@@ -1,8 +1,9 @@
-// Boot and the one loop: input is read every frame, the world advances in fixed
-// 1/60 s steps (several in a slow frame, none in a fast one), and the renderer
-// paints what is there. The game moves between five screens: title, play,
-// paused, busted and story-complete. Money and mission progress are saved to
-// localStorage when a mission is completed or the player is busted.
+// Boot and the one loop: input is read every frame, the world advances in
+// fixed 1/60 s steps (several in a slow frame, none in a fast one), and the
+// renderer paints what is there. The game moves between five screens:
+// title, play, paused, busted and story-complete. Money and mission progress
+// are saved to localStorage when a mission is completed or the player is
+// busted; a stash pickup saves too, so a found stash stays found.
 //
 // ?seed=N fixes the city. ?shot=start|cover|chase|mission (with &seed=N)
 // stages that scene instead of running the loop, paints it twice and sets
@@ -13,12 +14,13 @@ import { createRandom } from './random.js';
 import { createAudio } from './audio.js';
 import { ACTION_ADVANCE, ACTION_CONFIRM, ACTION_MUTE, ACTION_PAUSE, createInput } from './input.js';
 import { createRenderer } from './render.js';
-import { EV_BUSTED, EV_MISSION, EV_STORY, createWorld } from './world.js';
+import { EV_BUSTED, EV_MISSION, EV_PICKUP, EV_STORY, createWorld } from './world.js';
 import { stageShot } from './shots.js';
 
 /** The longest frame the loop catches up on; a longer stall is dropped, not replayed. */
 const MAX_FRAME = 0.25;
 const SAVE_VERSION = 1;
+const VERSION = '1.1.0';
 
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
@@ -32,10 +34,15 @@ const hud = {
   money: document.getElementById('money'),
   wanted: document.getElementById('wanted'),
   healthFill: document.getElementById('health-fill'),
+  carBar: document.getElementById('car-bar'),
+  carFill: document.getElementById('car-fill'),
+  carLabel: document.getElementById('car-label'),
   missionName: document.getElementById('mission-name'),
   objective: document.getElementById('objective'),
+  stashes: document.getElementById('stashes'),
   speed: document.getElementById('speed'),
   timer: document.getElementById('timer'),
+  prompt: document.getElementById('prompt'),
   dialogBox: document.getElementById('dialog-box'),
   dialogSpeaker: document.getElementById('dialog-speaker'),
   dialogText: document.getElementById('dialog-text'),
@@ -113,6 +120,7 @@ function runGame() {
   let bannerTimer = 0;
   let accumulator = 0;
   let last = performance.now();
+  let lastTickSecond = -1;
 
   const overlays = {
     title: document.getElementById('title-screen'),
@@ -155,6 +163,7 @@ function runGame() {
       applySave(data);
     }
     accumulator = 0;
+    lastTickSecond = -1;
     screen = 'play';
     showOnly(null);
     announce('Playing. Follow the objective on the left.');
@@ -180,6 +189,10 @@ function runGame() {
     if (events & EV_MISSION) {
       const done = MISSIONS[Math.min(world.state.missionIndex, MISSIONS.length) - 1];
       showBanner(done ? `MISSION COMPLETE  ·  +$${done.reward}` : 'MISSION COMPLETE');
+      writeSave();
+    }
+    if (events & EV_PICKUP) {
+      showBanner(`STASH FOUND  ·  +$${world.state.lastPickup}`);
       writeSave();
     }
     if (events & EV_STORY) {
@@ -240,6 +253,17 @@ function runGame() {
     const move = input.move();
     const events = world.step(STEP, move, { camYaw: renderer.camYaw }, actions);
     handleEvents(events);
+    // The delivery timer ticks its last ten seconds, one blip per second.
+    const timer = world.state.missionTimer;
+    if (timer > 0 && timer <= 10) {
+      const whole = Math.ceil(timer);
+      if (whole !== lastTickSecond) {
+        lastTickSecond = whole;
+        audio.tick();
+      }
+    } else {
+      lastTickSecond = -1;
+    }
     audio.update(STEP, {
       driving: !world.state.player.onFoot,
       speedRatio: Math.abs(world.state.player.car ? world.state.player.car.speed : 0) / 30,
@@ -312,7 +336,7 @@ function runGame() {
 
   // For play-tests and debugging: the live state, read-only from the console.
   window.__sunset = {
-    version: '1.0.0',
+    version: VERSION,
     world,
     renderer,
     screen: () => screen,

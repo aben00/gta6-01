@@ -1,12 +1,12 @@
 // SUNSET HEAT — the simulation. No drawing and no DOM here: the player's
 // body and cars, traffic and pedestrians, the police and the wanted level,
-// and the three story missions. step() advances one fixed step and returns
-// what happened as bit flags, so the caller can react (sounds, screens)
-// without the world knowing about them.
+// the three story missions, the street stashes and car damage. step()
+// advances one fixed step and returns what happened as bit flags, so the
+// caller can react (sounds, screens) without the world knowing about them.
 
-import { CAR, CITY, COPS, MISSIONS, PEDS, PLAYER, SAFEHOUSE, START_MONEY, TRAFFIC, WANTED } from './config.js';
+import { CAR, CITY, COPS, DAMAGE, HORN, MISSIONS, PEDS, PLAYER, SAFEHOUSE, STASHES, STASH_RANGE, START_MONEY, TRAFFIC, WANTED } from './config.js';
 import { buildCity, nearestRoadPoint, roadLines } from './city.js';
-import { ACTION_ADVANCE, ACTION_INTERACT, ACTION_PUNCH } from './input.js';
+import { ACTION_ADVANCE, ACTION_HORN, ACTION_INTERACT, ACTION_PUNCH } from './input.js';
 import { randPick, randRange } from './random.js';
 
 export const EV_NONE = 0;
@@ -16,6 +16,7 @@ export const EV_STORY = 4;
 export const EV_WANTED_UP = 8;
 export const EV_CRASH = 16;
 export const EV_DIALOG = 32;
+export const EV_PICKUP = 64;
 
 const TAU = Math.PI * 2;
 
@@ -36,7 +37,7 @@ function dist(ax, az, bx, bz) {
   return Math.sqrt(dx * dx + dz * dz);
 }
 
-/** Push a circle out of building AABBs; returns the push vector and whether it hit. */
+/** Push a circle out of building AABBs; returns the corrected spot and whether it hit. */
 function collideBuildings(buildings, x, z, r) {
   let px = 0;
   let pz = 0;
@@ -103,6 +104,12 @@ export function createWorld(random, audio) {
     dialog: null,
     dialogTimer: 0,
     impact: 0, // crash shake, decays
+    prompt: null, // context hint for E, read by the HUD
+    repairing: false,
+    stashes: [],
+    stashesFound: 0,
+    stashesTotal: STASHES.length,
+    lastPickup: 0,
     player: null,
     cars: [],
     peds: [],
@@ -119,6 +126,8 @@ export function createWorld(random, audio) {
       speed: 0,
       steer: 0,
       color,
+      dmg: 0, // 0 = showroom, 1 = wreck; bends top speed and smokes
+      taxi: false,
       // traffic AI
       lane: 'x',
       line: 0,
@@ -144,10 +153,13 @@ export function createWorld(random, audio) {
         z = -z;
       }
     }
-    const car = makeCar('traffic', x, z, lane === 'x' ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (dir > 0 ? 0 : Math.PI), randPick(random, city.carColors));
+    const taxi = random() < CAR.taxiChance;
+    const color = taxi ? 0xe8b820 : randPick(random, city.carColors);
+    const car = makeCar('traffic', x, z, lane === 'x' ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (dir > 0 ? 0 : Math.PI), color);
     car.lane = lane;
     car.line = line;
     car.dir = dir;
+    car.taxi = taxi;
     car.cruise = TRAFFIC.speed + randRange(random, -TRAFFIC.speedJitter, TRAFFIC.speedJitter);
     car.speed = car.cruise;
     return car;
@@ -295,6 +307,11 @@ export function createWorld(random, audio) {
     state.busted = false;
     state.dialog = null;
     state.impact = 0;
+    state.prompt = null;
+    state.repairing = false;
+    state.stashes = STASHES.map((s) => ({ x: s.x, z: s.z, amount: s.amount, taken: false }));
+    state.stashesFound = 0;
+    state.lastPickup = 0;
     state.cars = [];
     state.peds = [];
     state.officers = [];
@@ -335,6 +352,20 @@ export function createWorld(random, audio) {
     return best;
   }
 
+  function nearestStash(x, z, maxDist) {
+    let best = null;
+    let bestD = maxDist;
+    for (const stash of state.stashes) {
+      if (stash.taken) continue;
+      const d = dist(x, z, stash.x, stash.z);
+      if (d < bestD) {
+        bestD = d;
+        best = stash;
+      }
+    }
+    return best;
+  }
+
   function enterCar(car) {
     const p = state.player;
     p.onFoot = false;
@@ -369,16 +400,51 @@ export function createWorld(random, audio) {
     const p = state.player;
     if (p.onFoot) {
       const car = nearestCar(p.x, p.z, CAR.enterRange);
-      if (!car) return EV_NONE;
-      const wasTraffic = car.kind === 'traffic';
-      enterCar(car);
-      if (wasTraffic) {
-        state.cars.push(spawnTrafficCar(true));
-        return addWanted(WANTED.stealCar, 'steal');
+      if (car) {
+        const wasTraffic = car.kind === 'traffic';
+        enterCar(car);
+        if (wasTraffic) {
+          state.cars.push(spawnTrafficCar(true));
+          return addWanted(WANTED.stealCar, 'steal');
+        }
+        return EV_NONE;
+      }
+      // No car in reach: maybe a stash is.
+      const stash = nearestStash(p.x, p.z, STASH_RANGE);
+      if (stash) {
+        stash.taken = true;
+        state.money += stash.amount;
+        state.stashesFound += 1;
+        state.lastPickup = stash.amount;
+        audio.coin();
+        return EV_PICKUP;
       }
       return EV_NONE;
     }
     exitCar();
+    return EV_NONE;
+  }
+
+  function honk() {
+    const p = state.player;
+    if (p.onFoot || !p.car) return EV_NONE;
+    audio.horn();
+    // Pedestrians in the cone ahead of the car scatter off the road.
+    const fx = Math.sin(p.car.yaw);
+    const fz = Math.cos(p.car.yaw);
+    for (const ped of state.peds) {
+      if (ped.mode === 'down') continue;
+      const dx = ped.x - p.x;
+      const dz = ped.z - p.z;
+      const d = Math.hypot(dx, dz);
+      if (d > HORN.range || d < 0.01) continue;
+      const dot = (dx * fx + dz * fz) / d;
+      if (dot < Math.cos(HORN.cone)) continue;
+      ped.mode = 'flee';
+      const away = Math.atan2(ped.x - p.x, ped.z - p.z);
+      ped.tx = ped.x + Math.sin(away) * 40;
+      ped.tz = ped.z + Math.cos(away) * 40;
+    }
     return EV_NONE;
   }
 
@@ -480,6 +546,8 @@ export function createWorld(random, audio) {
     const forward = move.forward;
     const brake = move.forward < 0;
     p.throttle = forward > 0;
+    // A bent car loses top speed: a wreck tops out barely above traffic.
+    const topSpeed = CAR.maxSpeed * (1 - DAMAGE.maxSpeedLoss * car.dmg);
     if (forward > 0) {
       car.speed += CAR.accel * dt;
     } else if (brake) {
@@ -489,7 +557,7 @@ export function createWorld(random, audio) {
       car.speed -= Math.sign(car.speed) * CAR.drag * 2.2 * dt;
       if (Math.abs(car.speed) < 0.3) car.speed = 0;
     }
-    car.speed = clamp(car.speed, -CAR.maxReverse, CAR.maxSpeed);
+    car.speed = clamp(car.speed, -CAR.maxReverse, topSpeed);
     const speedFactor = 1 - Math.min(1, Math.abs(car.speed) / CAR.maxSpeed) * 0.55;
     const targetSteer = move.strafe * CAR.steerMax * speedFactor;
     car.steer += (targetSteer - car.steer) * Math.min(1, 10 * dt);
@@ -520,6 +588,10 @@ export function createWorld(random, audio) {
             audio.crash(impactSpeed / 20);
             events |= EV_CRASH;
           }
+          // A hard hit bends the car. The faster the hit, the worse the bend.
+          if (impactSpeed > DAMAGE.crashSpeed) {
+            car.dmg = Math.min(1, car.dmg + (impactSpeed - DAMAGE.crashSpeed) / DAMAGE.perCrash);
+          }
         }
       }
       car.x = fixed.x;
@@ -537,6 +609,60 @@ export function createWorld(random, audio) {
     p.speed = Math.abs(car.speed);
     p.moving = Math.abs(car.speed) > 0.5;
     return events;
+  }
+
+  function updateRepair(dt) {
+    const p = state.player;
+    state.repairing = false;
+    if (dist(p.x, p.z, SAFEHOUSE[0], SAFEHOUSE[1]) >= DAMAGE.repairRadius) return;
+    if (!p.onFoot && p.car) {
+      if (p.car.dmg > 0 && Math.abs(p.car.speed) < 1) {
+        p.car.dmg = Math.max(0, p.car.dmg - DAMAGE.repairRate * dt);
+        state.repairing = true;
+      }
+      return;
+    }
+    // On foot at the safehouse: the nearest parked car gets the same treatment.
+    let best = null;
+    let bestD = DAMAGE.repairRadius;
+    for (const car of state.cars) {
+      if (car.kind !== 'parked') continue;
+      const d = dist(p.x, p.z, car.x, car.z);
+      if (d < bestD) {
+        bestD = d;
+        best = car;
+      }
+    }
+    if (best && best.dmg > 0) {
+      best.dmg = Math.max(0, best.dmg - DAMAGE.repairRate * dt);
+      state.repairing = true;
+    }
+  }
+
+  /** The one-line context hint the HUD shows under the crosshair area. */
+  function updatePrompt() {
+    const p = state.player;
+    if (!p.onFoot && p.car) {
+      if (state.repairing) {
+        state.prompt = 'Repairing the car…';
+      } else if (p.car.dmg > 0.25) {
+        state.prompt = 'E — Get out · car is damaged, safehouse repairs it';
+      } else {
+        state.prompt = 'E — Get out of the car';
+      }
+      return;
+    }
+    const car = nearestCar(p.x, p.z, CAR.enterRange);
+    if (car) {
+      state.prompt = car.kind === 'traffic' ? 'E — Steal this car ★' : 'E — Get in the car';
+      return;
+    }
+    const stash = nearestStash(p.x, p.z, STASH_RANGE);
+    if (stash) {
+      state.prompt = `E — Grab the stash (+$${stash.amount})`;
+      return;
+    }
+    state.prompt = null;
   }
 
   function updateTraffic(dt) {
@@ -592,6 +718,8 @@ export function createWorld(random, audio) {
         car.dir = fresh.dir;
         car.speed = fresh.cruise;
         car.cruise = fresh.cruise;
+        car.taxi = fresh.taxi;
+        car.color = fresh.color;
       }
     }
     // Keep traffic cars from overlapping each other.
@@ -731,6 +859,7 @@ export function createWorld(random, audio) {
         audio.crash(0.8);
         if (!p.onFoot && p.car) {
           p.car.speed *= 0.55;
+          p.car.dmg = Math.min(1, p.car.dmg + DAMAGE.ramAdd);
           p.car.x += (dx / (d || 1)) * -1.5;
           p.car.z += (dz / (d || 1)) * -1.5;
         } else {
@@ -824,12 +953,13 @@ export function createWorld(random, audio) {
         events |= EV_CRASH;
       }
     }
-    // Ramming a cruiser is a crime too.
+    // Ramming a cruiser is a crime too, and it bends your own car as well.
     for (const cop of state.cars) {
       if (cop.kind !== 'cop' || cop.ramCooldown > 0) continue;
       if (dist(cop.x, cop.z, car.x, car.z) < CAR.radius + 1.6 && Math.abs(car.speed) > 5) {
         cop.ramCooldown = 1.5;
         cop.speed *= 0.5;
+        car.dmg = Math.min(1, car.dmg + DAMAGE.ramAdd);
         state.impact = 0.7;
         audio.crash(0.9);
         events |= addWanted(WANTED.ramCopCar, 'ram-cop');
@@ -918,6 +1048,7 @@ export function createWorld(random, audio) {
 
     if (actions & ACTION_INTERACT) events |= tryInteract();
     if (actions & ACTION_PUNCH) events |= punch();
+    if (actions & ACTION_HORN) events |= honk();
 
     if (state.player.onFoot) updatePlayerOnFoot(dt, move, look);
     else events |= updatePlayerCar(dt, move);
@@ -928,6 +1059,8 @@ export function createWorld(random, audio) {
     events |= updateCops(dt);
     updateWanted(dt);
     events |= updateMissions(dt);
+    updateRepair(dt);
+    updatePrompt();
 
     if (state.dialog) {
       state.dialogTimer += dt;
