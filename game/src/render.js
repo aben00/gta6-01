@@ -121,13 +121,13 @@ function makeSkyBand() {
 
 /** The lights: sky bounce, the low sun, and a warm fill from the south. */
 function addLights(scene) {
-  scene.add(new THREE.HemisphereLight(COLORS.hemiSky, COLORS.hemiGround, 1.1));
+  scene.add(new THREE.HemisphereLight(COLORS.hemiSky, COLORS.hemiGround, 1.3));
   const sunLight = new THREE.DirectionalLight(COLORS.sunLight, 1.25);
   sunLight.position.set(150, 200, 300);
   scene.add(sunLight);
   // A warm fill from the south, so the faces turned toward the camera
   // (car rears, the player's back) never go black at dusk.
-  const fillLight = new THREE.DirectionalLight(0xffe0c0, 0.9);
+  const fillLight = new THREE.DirectionalLight(0xffe0c0, 1.15);
   fillLight.position.set(-60, 140, -260);
   scene.add(fillLight);
 }
@@ -431,7 +431,7 @@ export function createRenderer(canvas, layout, random) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'low-power' });
   if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
   if (THREE.ACESFilmicToneMapping !== undefined) renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.12;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(COLORS.sky);

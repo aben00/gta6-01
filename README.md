@@ -75,8 +75,9 @@ Chrome and plays from its own files, with three.js vendored under
 
 `shots.json` lists the four shots and the `?shot=` scene behind each
 (`cover`, `chase`, `mission`, `start`, all `&seed=7`): the red car running
-for the beach at full speed, the foot chase with a cruiser behind, the
-punch beside the red car, and the title over the dusk skyline.
+north up the beach road at 108 km/h with a taxi ahead, the foot chase
+between two cruisers closing in, the punch beside the red car with a
+cruiser closing in, and the title over the dusk skyline.
 
 ## Hand in
 
