@@ -1,8 +1,10 @@
-// Solmarina itself: the static city. generateLayout rolls the city from a
-// seed (building footprints, lamps, palms, boats); buildCity turns that
-// layout into three.js meshes. All ~80 buildings merge into ONE mesh, the
-// lamps into one more, the boats into one more — the whole static city is
-// a handful of draw calls, which is what keeps the frame cheap.
+// Solmarina itself: the static city.
+//
+// generateLayout rolls the city from a seed (building footprints, lamps,
+// palms, boats); buildCity turns that layout into three.js meshes. All
+// ~80 buildings merge into ONE mesh, the lamps into one more, the boats
+// into one more — the whole static city is a handful of draw calls, which
+// is what keeps the frame cheap.
 //
 // The ground is a single plane wearing a canvas texture: asphalt, blocks,
 // sidewalks, crosswalks, lane dashes and the sand strip are all painted
@@ -20,6 +22,79 @@ function closeToSpot(x, z, spots, radius) {
     if (Math.hypot(s.x - x, s.z - z) < radius) return true;
   }
   return false;
+}
+
+/**
+ * Fold boxes into one BufferGeometry. Each part is
+ * {w,h,d, x,y,z, ry, color}; when `facade` is set the UVs are scaled so
+ * the window texture repeats every few metres instead of stretching.
+ */
+class PartMerger {
+  constructor(facade) {
+    this.facade = facade;
+    this.position = [];
+    this.normal = [];
+    this.uv = [];
+    this.color = [];
+    this.index = [];
+    this.base = 0;
+    this.tint = new THREE.Color();
+  }
+
+  /** Scale a tower's UVs so windows stay the same size on any height. */
+  scaleFacadeUVs(geo, part) {
+    // BoxGeometry faces run +x -x +y -y +z -z; each face's UVs scale by
+    // its real-world size so windows stay the same size on any tower.
+    const faceSize = [
+      [part.d, part.h], [part.d, part.h], [part.w, part.d],
+      [part.w, part.d], [part.w, part.h], [part.w, part.h],
+    ];
+    const uv = geo.attributes.uv;
+    for (let v = 0; v < uv.count; v += 1) {
+      const face = Math.floor(v / 4);
+      uv.setXY(v, uv.getX(v) * (faceSize[face][0] / 13), uv.getY(v) * (faceSize[face][1] / 21));
+    }
+  }
+
+  add(part) {
+    const geo = new THREE.BoxGeometry(part.w, part.h, part.d);
+    if (this.facade) this.scaleFacadeUVs(geo, part);
+    const matrix = new THREE.Matrix4().makeRotationY(part.ry || 0);
+    matrix.setPosition(part.x, part.y, part.z);
+    geo.applyMatrix4(matrix);
+    const pos = geo.attributes.position;
+    const nor = geo.attributes.normal;
+    const uvAttr = geo.attributes.uv;
+    this.tint.setHex(part.color);
+    for (let v = 0; v < pos.count; v += 1) {
+      this.position.push(pos.getX(v), pos.getY(v), pos.getZ(v));
+      this.normal.push(nor.getX(v), nor.getY(v), nor.getZ(v));
+      this.uv.push(uvAttr.getX(v), uvAttr.getY(v));
+      this.color.push(this.tint.r, this.tint.g, this.tint.b);
+    }
+    const index = geo.index;
+    for (let i = 0; i < index.count; i += 1) this.index.push(index.getX(i) + this.base);
+    this.base += pos.count;
+    geo.dispose();
+    return this;
+  }
+
+  build() {
+    const merged = new THREE.BufferGeometry();
+    merged.setAttribute('position', new THREE.Float32BufferAttribute(this.position, 3));
+    merged.setAttribute('normal', new THREE.Float32BufferAttribute(this.normal, 3));
+    merged.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+    merged.setAttribute('color', new THREE.Float32BufferAttribute(this.color, 3));
+    merged.setIndex(this.index);
+    return merged;
+  }
+}
+
+/** Merge a list of parts into one geometry, facades optional. */
+function mergeParts(parts, facade) {
+  const merger = new PartMerger(facade);
+  for (const part of parts) merger.add(part);
+  return merger.build();
 }
 
 /** Roll one plot's buildings into `out`, skipping the cleared spots. */
@@ -97,79 +172,6 @@ export function generateLayout(random) {
     palms: rollPalms(random),
     boats: rollBoats(random),
   };
-}
-
-/**
- * Fold boxes into one BufferGeometry. Each part is
- * {w,h,d, x,y,z, ry, color}; when `facade` is set the UVs are scaled so
- * the window texture repeats every few metres instead of stretching.
- */
-class PartMerger {
-  constructor(facade) {
-    this.facade = facade;
-    this.position = [];
-    this.normal = [];
-    this.uv = [];
-    this.color = [];
-    this.index = [];
-    this.base = 0;
-    this.tint = new THREE.Color();
-  }
-
-  /** Scale a tower's UVs so windows stay the same size on any height. */
-  scaleFacadeUVs(geo, part) {
-    // BoxGeometry faces run +x -x +y -y +z -z; each face's UVs scale by
-    // its real-world size so windows stay the same size on any tower.
-    const faceSize = [
-      [part.d, part.h], [part.d, part.h], [part.w, part.d],
-      [part.w, part.d], [part.w, part.h], [part.w, part.h],
-    ];
-    const uv = geo.attributes.uv;
-    for (let v = 0; v < uv.count; v += 1) {
-      const face = Math.floor(v / 4);
-      uv.setXY(v, uv.getX(v) * (faceSize[face][0] / 13), uv.getY(v) * (faceSize[face][1] / 21));
-    }
-  }
-
-  add(part) {
-    const geo = new THREE.BoxGeometry(part.w, part.h, part.d);
-    if (this.facade) this.scaleFacadeUVs(geo, part);
-    const matrix = new THREE.Matrix4().makeRotationY(part.ry || 0);
-    matrix.setPosition(part.x, part.y, part.z);
-    geo.applyMatrix4(matrix);
-    const pos = geo.attributes.position;
-    const nor = geo.attributes.normal;
-    const uvAttr = geo.attributes.uv;
-    this.tint.setHex(part.color);
-    for (let v = 0; v < pos.count; v += 1) {
-      this.position.push(pos.getX(v), pos.getY(v), pos.getZ(v));
-      this.normal.push(nor.getX(v), nor.getY(v), nor.getZ(v));
-      this.uv.push(uvAttr.getX(v), uvAttr.getY(v));
-      this.color.push(this.tint.r, this.tint.g, this.tint.b);
-    }
-    const index = geo.index;
-    for (let i = 0; i < index.count; i += 1) this.index.push(index.getX(i) + this.base);
-    this.base += pos.count;
-    geo.dispose();
-    return this;
-  }
-
-  build() {
-    const merged = new THREE.BufferGeometry();
-    merged.setAttribute('position', new THREE.Float32BufferAttribute(this.position, 3));
-    merged.setAttribute('normal', new THREE.Float32BufferAttribute(this.normal, 3));
-    merged.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
-    merged.setAttribute('color', new THREE.Float32BufferAttribute(this.color, 3));
-    merged.setIndex(this.index);
-    return merged;
-  }
-}
-
-/** Merge a list of parts into one geometry, facades optional. */
-function mergeParts(parts, facade) {
-  const merger = new PartMerger(facade);
-  for (const part of parts) merger.add(part);
-  return merger.build();
 }
 
 /** One facade texture: a pale wall with a grid of windows, some lit warm. */

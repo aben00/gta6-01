@@ -1,8 +1,12 @@
 // Synthesised sound for Sunset Heat: no audio files, everything is built
-// from oscillators and filtered noise in the Web Audio API. The context is
-// created lazily on the first user gesture (browsers block audio before
-// one), every call is guarded, and M mutes the master gain — so a headless
-// run with no audio device never throws.
+// from oscillators and filtered noise in the Web Audio API.
+//
+// The context is created lazily on the first user gesture (browsers block
+// audio before one), every call is guarded, and M mutes the master gain —
+// so a headless run with no audio device never throws.
+
+/** Master gain when unmuted. */
+const MASTER_LEVEL = 0.5;
 
 /** One-shot effect presets: [frequency, seconds, wave, volume, slideTo]. */
 const BLIPS = {
@@ -41,7 +45,7 @@ export class SoundBank {
       const ctx = new Ctor();
       this.context = ctx;
       this.master = ctx.createGain();
-      this.master.gain.value = this.muted ? 0 : 0.5;
+      this.master.gain.value = this.muted ? 0 : MASTER_LEVEL;
       this.master.connect(ctx.destination);
       this.buildEngineLoop(ctx);
       this.buildSirenLoop(ctx);
@@ -50,39 +54,6 @@ export class SoundBank {
       return false;
     }
     return true;
-  }
-
-  /** Engine: a low sawtooth plus a detuned square, through a lowpass. */
-  buildEngineLoop(ctx) {
-    this.engineOsc = ctx.createOscillator();
-    this.engineOsc.type = 'sawtooth';
-    this.engineOsc.frequency.value = 52;
-    this.engineOsc2 = ctx.createOscillator();
-    this.engineOsc2.type = 'square';
-    this.engineOsc2.frequency.value = 26;
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 320;
-    this.engineGain = ctx.createGain();
-    this.engineGain.gain.value = 0;
-    this.engineOsc.connect(filter);
-    this.engineOsc2.connect(filter);
-    filter.connect(this.engineGain);
-    this.engineGain.connect(this.master);
-    this.engineOsc.start();
-    this.engineOsc2.start();
-  }
-
-  /** Siren: one triangle wave whose frequency the update loop swings. */
-  buildSirenLoop(ctx) {
-    this.sirenOsc = ctx.createOscillator();
-    this.sirenOsc.type = 'triangle';
-    this.sirenOsc.frequency.value = 720;
-    this.sirenGain = ctx.createGain();
-    this.sirenGain.gain.value = 0;
-    this.sirenOsc.connect(this.sirenGain);
-    this.sirenGain.connect(this.master);
-    this.sirenOsc.start();
   }
 
   /** Resume a suspended context after a user gesture. */
@@ -151,15 +122,85 @@ export class SoundBank {
     if (preset) this.tone(preset[0], preset[1], preset[2], preset[3], preset[4]);
   }
 
+  // ---------------------------------------------------------- one-shot effects
+
+  /** The car horn: two tones at once, a low one and a higher one. */
+  horn() {
+    this.tone(370, 0.45, 'square', 0.16);
+    this.tone(466, 0.45, 'square', 0.12);
+  }
+
+  /** The mission clock ticking in its last ten seconds. */
+  tick() {
+    this.blip('tick');
+  }
+
+  /** Cash-register chime for a stash or a mission payout. */
+  chime() {
+    this.blip('chimeLow');
+    setTimeout(() => this.blip('chimeHigh'), 90);
+  }
+
+  /** A punch landing. */
+  thud() {
+    this.noise(0.14, 0.5, 500);
+    this.blip('thudTone');
+  }
+
+  /** Metal on metal (or on concrete). */
+  crash() {
+    this.noise(0.3, 0.55, 1400);
+    this.blip('crashTone');
+  }
+
+  click() {
+    this.blip('click');
+  }
+
+  // ---------------------------------------------------------- continuous loops
+
   setMuted(value) {
     this.muted = !!value;
     if (this.master && this.context) {
       try {
-        this.master.gain.value = this.muted ? 0 : 0.5;
+        this.master.gain.value = this.muted ? 0 : MASTER_LEVEL;
       } catch {
         // Ignore.
       }
     }
+  }
+
+  /** Engine: a low sawtooth plus a detuned square, through a lowpass. */
+  buildEngineLoop(ctx) {
+    this.engineOsc = ctx.createOscillator();
+    this.engineOsc.type = 'sawtooth';
+    this.engineOsc.frequency.value = 52;
+    this.engineOsc2 = ctx.createOscillator();
+    this.engineOsc2.type = 'square';
+    this.engineOsc2.frequency.value = 26;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 320;
+    this.engineGain = ctx.createGain();
+    this.engineGain.gain.value = 0;
+    this.engineOsc.connect(filter);
+    this.engineOsc2.connect(filter);
+    filter.connect(this.engineGain);
+    this.engineGain.connect(this.master);
+    this.engineOsc.start();
+    this.engineOsc2.start();
+  }
+
+  /** Siren: one triangle wave whose frequency the update loop swings. */
+  buildSirenLoop(ctx) {
+    this.sirenOsc = ctx.createOscillator();
+    this.sirenOsc.type = 'triangle';
+    this.sirenOsc.frequency.value = 720;
+    this.sirenGain = ctx.createGain();
+    this.sirenGain.gain.value = 0;
+    this.sirenOsc.connect(this.sirenGain);
+    this.sirenGain.connect(this.master);
+    this.sirenOsc.start();
   }
 
   /** The engine hum follows the car's speed; silent on foot or parked. */
@@ -195,39 +236,6 @@ export class SoundBank {
     } catch {
       // Ignore.
     }
-  }
-
-  /** The car horn: two tones at once, a low one and a higher one. */
-  horn() {
-    this.tone(370, 0.45, 'square', 0.16);
-    this.tone(466, 0.45, 'square', 0.12);
-  }
-
-  /** The mission clock ticking in its last ten seconds. */
-  tick() {
-    this.blip('tick');
-  }
-
-  /** Cash-register chime for a stash or a mission payout. */
-  chime() {
-    this.blip('chimeLow');
-    setTimeout(() => this.blip('chimeHigh'), 90);
-  }
-
-  /** A punch landing. */
-  thud() {
-    this.noise(0.14, 0.5, 500);
-    this.blip('thudTone');
-  }
-
-  /** Metal on metal (or on concrete). */
-  crash() {
-    this.noise(0.3, 0.55, 1400);
-    this.blip('crashTone');
-  }
-
-  click() {
-    this.blip('click');
   }
 
   /** Called once a frame from the main loop for the continuous sounds. */

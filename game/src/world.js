@@ -1,10 +1,11 @@
-// Sunset Heat — the rules, with no drawing and no browser in them: the
-// player on foot and in cars, traffic and pedestrians, the wanted level
-// and the police who answer it, the three story jobs, the hidden stashes,
-// car damage and the safehouse repair, the bust and the save. step()
-// advances one fixed step and returns what happened as bit flags, so the
-// caller can play sounds and show banners without the world knowing
-// about screens or speakers.
+// Sunset Heat — the rules, with no drawing and no browser in them.
+//
+// The player on foot and in cars, traffic and pedestrians, the wanted
+// level and the police who answer it, the three story jobs, the hidden
+// stashes, car damage and the safehouse repair, the bust and the save.
+// step() advances one fixed step and returns what happened as bit flags,
+// so the caller can play sounds and show banners without the world
+// knowing about screens or speakers.
 //
 // Coordinates: x east, z north toward the beach. A heading of 0 faces
 // north (+z); forward is (sin(yaw), cos(yaw)).
@@ -38,28 +39,37 @@ const PARKED_SPOTS = [
   [60, -8, 0], [-70, -60, Math.PI], [90, 60, Math.PI / 2], [-120, -30, 0],
 ];
 
-function clampNum(value, min, max) {
+/** Clamp `value` into [min, max]. */
+function clampTo(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
+
+/** Wrap an angle into (-PI, PI]. */
 function angleWrap(angle) {
   while (angle > Math.PI) angle -= Math.PI * 2;
   while (angle < -Math.PI) angle += Math.PI * 2;
   return angle;
 }
+
+/** Turn `current` toward `target` by at most `maxStep`. */
 function steerToward(current, target, maxStep) {
-  return current + clampNum(angleWrap(target - current), -maxStep, maxStep);
+  return current + clampTo(angleWrap(target - current), -maxStep, maxStep);
 }
-function gap(ax, az, bx, bz) {
+
+/** Distance between two points on the ground plane. */
+function dist2d(ax, az, bx, bz) {
   return Math.hypot(ax - bx, az - bz);
 }
+
 /** Ease `current` toward `target` at `rate` per second, frame-safe. */
 function approach(current, target, rate, dt) {
   return current + (target - current) * Math.min(1, rate * dt);
 }
+
 /** Push a circle out of an axis-aligned box; null when clear. */
 function pushOutOfBox(x, z, radius, box) {
-  const cx = clampNum(x, box.minX, box.maxX);
-  const cz = clampNum(z, box.minZ, box.maxZ);
+  const cx = clampTo(x, box.minX, box.maxX);
+  const cz = clampTo(z, box.minZ, box.maxZ);
   const dx = x - cx;
   const dz = z - cz;
   const d2 = dx * dx + dz * dz;
@@ -78,10 +88,12 @@ function pushOutOfBox(x, z, radius, box) {
   if (m === top) return { x: 0, z: -(top + radius) };
   return { x: 0, z: bottom + radius };
 }
+
 /** The street line nearest to a coordinate, inside the grid. */
 function nearestRoad(value) {
-  return clampNum(Math.round(value / STREETS.every) * STREETS.every, -240, 240);
+  return clampTo(Math.round(value / STREETS.every) * STREETS.every, -240, 240);
 }
+
 /** A damaged car's top speed: the wreck penalty eats the top end. */
 function topSpeedFor(car) {
   return DRIVING.topSpeed * (1 - DRIVING.damageLoss * car.dmg);
@@ -171,7 +183,7 @@ export function createWorld(random) {
 
   function applySave(data) {
     state.money = data.money ?? START_MONEY;
-    state.missionIndex = clampNum(data.missionIndex ?? 0, 0, JOBS.length);
+    state.missionIndex = clampTo(data.missionIndex ?? 0, 0, JOBS.length);
     state.missionStage = data.missionStage ?? 0;
     state.storyDone = !!data.storyDone;
     state.stashesFound = data.stashesFound ?? 0;
@@ -285,8 +297,8 @@ export function createWorld(random) {
   function spawnOfficer() {
     const angle = random.range(0, Math.PI * 2);
     state.officers.push({
-      x: clampNum(state.player.x + Math.cos(angle) * POLICE.officerSpawn, -260, 260),
-      z: clampNum(state.player.z + Math.sin(angle) * POLICE.officerSpawn, -260, 260),
+      x: clampTo(state.player.x + Math.cos(angle) * POLICE.officerSpawn, -260, 260),
+      z: clampTo(state.player.z + Math.sin(angle) * POLICE.officerSpawn, -260, 260),
       yaw: 0, grab: 0, shirt: 0x1c2f6b,
       bob: random.range(0, Math.PI * 2),
     });
@@ -295,7 +307,7 @@ export function createWorld(random) {
   /** Raise the wanted level; returns EV_WANTED when a star is added. */
   function addWanted(amount) {
     const before = state.wanted;
-    state.wanted = clampNum(state.wanted + amount, 0, HEAT.maxStars);
+    state.wanted = clampTo(state.wanted + amount, 0, HEAT.maxStars);
     state.crimeTimer = 0;
     return state.wanted > before ? EV_WANTED : 0;
   }
@@ -306,7 +318,7 @@ export function createWorld(random) {
     let bestDist = range;
     for (const s of state.stashes) {
       if (s.found) continue;
-      const d = gap(x, z, s.x, s.z);
+      const d = dist2d(x, z, s.x, s.z);
       if (d < bestDist) {
         best = s;
         bestDist = d;
@@ -321,7 +333,7 @@ export function createWorld(random) {
     let bestDist = range;
     for (const c of state.cars) {
       if (c.kind === 'cop') continue;
-      const d = gap(x, z, c.x, c.z);
+      const d = dist2d(x, z, c.x, c.z);
       if (d < bestDist) {
         best = c;
         bestDist = d;
@@ -479,8 +491,8 @@ export function createWorld(random) {
     }
     // The island edge is a wall too: being clamped back counts as a hit,
     // the same way a building push does.
-    const cx = clampNum(px, ISLAND.west + 2, ISLAND.east - 2);
-    const cz = clampNum(pz, ISLAND.south + 2, ISLAND.north - 4);
+    const cx = clampTo(px, ISLAND.west + 2, ISLAND.east - 2);
+    const cz = clampTo(pz, ISLAND.south + 2, ISLAND.north - 4);
     if (cx !== px || cz !== pz) hit = true;
     return { x: cx, z: cz, hit };
   }
@@ -505,7 +517,7 @@ export function createWorld(random) {
       player.yaw = Math.atan2(mx, mz);
     }
     for (const car of state.cars) {
-      const d = gap(player.x, player.z, car.x, car.z);
+      const d = dist2d(player.x, player.z, car.x, car.z);
       const min = DRIVING.radius + ON_FOOT.radius;
       if (d < min && d > 0.01) {
         player.x += ((player.x - car.x) / d) * (min - d);
@@ -519,7 +531,7 @@ export function createWorld(random) {
     let events = 0;
     for (const other of state.cars) {
       if (other === car || other.kind === 'cop') continue;
-      const d = gap(car.x, car.z, other.x, other.z);
+      const d = dist2d(car.x, car.z, other.x, other.z);
       if (d >= DRIVING.radius * 2 || d <= 0.01) continue;
       const push = (DRIVING.radius * 2 - d) / 2;
       const ux = (car.x - other.x) / d;
@@ -553,7 +565,7 @@ export function createWorld(random) {
     let events = 0;
     for (const ped of state.peds) {
       if (ped.mode === 'down') continue;
-      const d = gap(car.x, car.z, ped.x, ped.z);
+      const d = dist2d(car.x, car.z, ped.x, ped.z);
       if (d < 2.2 && Math.abs(car.speed) > 3) {
         ped.mode = 'down';
         ped.modeTimer = CROWD.pedDownSeconds;
@@ -578,7 +590,7 @@ export function createWorld(random) {
       car.speed -= car.speed * 0.45 * dt;
       if (Math.abs(car.speed) < 0.15) car.speed = 0;
     }
-    car.yaw += input.strafe * DRIVING.steerRate * dt * clampNum(car.speed / 6, -1, 1);
+    car.yaw += input.strafe * DRIVING.steerRate * dt * clampTo(car.speed / 6, -1, 1);
     const nx = car.x + Math.sin(car.yaw) * car.speed * dt;
     const nz = car.z + Math.cos(car.yaw) * car.speed * dt;
     const moved = moveWithCollision(nx, nz, DRIVING.radius);
@@ -644,7 +656,7 @@ export function createWorld(random) {
     car.speed = approach(car.speed, target, 2.5, dt);
     car.x += Math.sin(car.yaw) * car.speed * dt;
     car.z += Math.cos(car.yaw) * car.speed * dt;
-    if (gap(car.x, car.z, car.targetX, car.targetZ) < 4) pickNextCrossing(car);
+    if (dist2d(car.x, car.z, car.targetX, car.targetZ) < 4) pickNextCrossing(car);
   }
 
   function stepTraffic(dt) {
@@ -685,7 +697,7 @@ export function createWorld(random) {
     );
     ped.x = next.x;
     ped.z = next.z;
-    if (ped.mode === 'walk' && gap(ped.x, ped.z, ped.targetX, ped.targetZ) < 1.5) pickPedCorner(ped);
+    if (ped.mode === 'walk' && dist2d(ped.x, ped.z, ped.targetX, ped.targetZ) < 1.5) pickPedCorner(ped);
   }
 
   function stepPeds(dt) {
@@ -696,7 +708,7 @@ export function createWorld(random) {
   function chasePlayer(cop, dt) {
     cop.ramCooldown = Math.max(0, cop.ramCooldown - dt);
     const player = state.player;
-    const d = gap(cop.x, cop.z, player.x, player.z);
+    const d = dist2d(cop.x, cop.z, player.x, player.z);
     const desired = Math.atan2(player.x - cop.x, player.z - cop.z);
     cop.yaw = steerToward(cop.yaw, desired, 2.2 * dt);
     const target = d > 30 ? POLICE.cruiserSpeed : d > 8 ? 10 : 7;
@@ -738,7 +750,7 @@ export function createWorld(random) {
   function chaseOnFoot(officer, dt) {
     const player = state.player;
     officer.bob += dt * 8;
-    const d = gap(officer.x, officer.z, player.x, player.z);
+    const d = dist2d(officer.x, officer.z, player.x, player.z);
     if (player.onFoot && d < 1.6) {
       officer.grab += dt;
       if (officer.grab >= POLICE.grabSeconds) {
@@ -807,7 +819,7 @@ export function createWorld(random) {
       }
       return 0;
     }
-    if (gap(state.player.x, state.player.z, PLACES.marina.x, PLACES.marina.z) < PLACES.markerRadius) {
+    if (dist2d(state.player.x, state.player.z, PLACES.marina.x, PLACES.marina.z) < PLACES.markerRadius) {
       completeMission(0);
       state.dialogue = LINES.marina;
       return EV_MISSION;
@@ -832,7 +844,7 @@ export function createWorld(random) {
       showBanner('Out of time — run it again', 3);
       return events;
     }
-    if (gap(state.player.x, state.player.z, PLACES.pier.x, PLACES.pier.z) < PLACES.markerRadius) {
+    if (dist2d(state.player.x, state.player.z, PLACES.pier.x, PLACES.pier.z) < PLACES.markerRadius) {
       completeMission(1);
       state.dialogue = LINES.setup;
       state.wanted = 3;
@@ -852,7 +864,7 @@ export function createWorld(random) {
       }
       return 0;
     }
-    if (gap(state.player.x, state.player.z, PLACES.safehouse.x, PLACES.safehouse.z) < PLACES.markerRadius) {
+    if (dist2d(state.player.x, state.player.z, PLACES.safehouse.x, PLACES.safehouse.z) < PLACES.markerRadius) {
       // Flag the story done before the payout saves, so a save written
       // here never claims the last job is still open.
       state.storyDone = true;
@@ -897,7 +909,7 @@ export function createWorld(random) {
       state.repairing = false;
       return 0;
     }
-    if (gap(car.x, car.z, PLACES.safehouse.x, PLACES.safehouse.z) >= DRIVING.repairRadius) {
+    if (dist2d(car.x, car.z, PLACES.safehouse.x, PLACES.safehouse.z) >= DRIVING.repairRadius) {
       state.repairing = false;
       return 0;
     }
@@ -973,11 +985,11 @@ export function createWorld(random) {
       state.player.yaw = yaw || 0;
     },
     setWanted(value) {
-      state.wanted = clampNum(value, 0, HEAT.maxStars);
+      state.wanted = clampTo(value, 0, HEAT.maxStars);
       state.crimeTimer = 0;
     },
     setMission(index) {
-      state.missionIndex = clampNum(index, 0, JOBS.length - 1);
+      state.missionIndex = clampTo(index, 0, JOBS.length - 1);
       state.missionStage = 0;
       state.missionTimer = JOBS[state.missionIndex].timeLimit || JOBS[1].timeLimit;
       state.objective = objectiveFor(state.missionIndex, false);

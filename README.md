@@ -10,15 +10,16 @@ at dusk, yours to steal, outrun and finish. Everything in it is original —
 the city, the characters, the vehicles, the names, the story, the art and
 the sounds. No Rockstar names, assets or places anywhere.
 
-## What it is
+## The game
 
 Solmarina is a grid city on the sea, one sunset away from dark. You arrive
 on foot with $50 and a phone call from Marco, who has three jobs for you.
 Drive the beach road, walk the sidewalks, take cars that are not yours,
 dodge the Solmarina PD, and find the cash the city hides.
 
-- **On foot and behind the wheel** — third-person chase camera, WASD plus
-  mouse look, traffic driving the grid and pedestrians on the sidewalks.
+- **On foot and behind the wheel** — a third-person chase camera, WASD
+  plus mouse look, traffic driving the grid and pedestrians on the
+  sidewalks.
 - **Stealing** — a parked car is free. A traffic car or a taxi is a crime:
   the owner calls it in and a wanted star follows. Cars accelerate, brake
   and reverse, and a hard crash bends them: top speed falls (a wreck does
@@ -60,26 +61,34 @@ dodge the Solmarina PD, and find the cash the city hides.
 | M | Mute |
 | Enter | Start / continue |
 
-## Run it
+## Running it
 
 ```sh
 node serve.ts
 # then open http://localhost:8080
 ```
 
-No build step and no network request: `game/index.html` opens in desktop
-Chrome and plays from its own files, with three.js vendored under
+There is no build step and no network request: `game/index.html` opens in
+desktop Chrome and plays from its own files, with three.js vendored under
 `game/vendor/`.
 
 ## Screenshots
 
 `shots.json` lists the four shots and the `?shot=` scene behind each
-(`cover`, `chase`, `mission`, `start`, all `&seed=7`): the red car running
-north up the beach road at 108 km/h with a taxi ahead, the foot chase
-between two cruisers closing in, the punch beside the red car with a
-cruiser closing in, and the title over the dusk skyline.
+(`cover`, `chase`, `mission`, `start`, all `&seed=7`). Each scene is
+staged close and dense so it reads at contact-sheet size: the cover is a
+low close camera 9 m behind the red car, 3.2 m up, looking 22 m ahead up
+the beach road at 108 km/h with a yellow taxi and a white car ahead in
+the lane and the lens corridor clear of pedestrians; the chase is two
+cruisers in a pincer around the player on foot — one behind-right, one
+ahead-left cutting him off — camera close and low with random traffic
+cleared from the corridor; the mission shot has the punched pedestrian
+lying visible in the open front-left of the player, the red car beside
+him, a witness ped on the sidewalk and a cop closing in; the title shot
+is a low fixed camera over the south street looking north across the
+facades toward the sunset, with the current tagline.
 
-## Hand in
+## Handing it in
 
 ```sh
 mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
@@ -88,20 +97,20 @@ mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 `main.ts` stages `game/` and `screenshots/` into `/output` and writes
 `/output/dossier.json` with the vendored make.fun library.
 
-## Files
+## Source layout
 
-- `game/index.html` — page, HUD, overlays, import map
-- `game/src/main.js` — boot, fixed-step loop, screens
+- `game/index.html` — the page, HUD, overlays and import map
+- `game/src/main.js` — boot, the fixed-step loop and the screens
 - `game/src/world.js` — the rules: driving, traffic, police, missions,
   stashes, damage, bust, save
-- `game/src/render.js` — three.js scene, chase camera, HUD, minimap,
-  auto-quality
+- `game/src/render.js` — the three.js scene, chase camera, HUD, minimap
+  and auto-quality
 - `game/src/city.js` — Solmarina: merged buildings, painted ground,
   pier, boats, lamps, safehouse
 - `game/src/config.js` — every tuning number, place and payout
-- `game/src/input.js` — keyboard, mouse orbit, one-shot presses
+- `game/src/input.js` — keyboard, mouse orbit and one-shot presses
 - `game/src/audio.js` — synthesised WebAudio: engine, siren, horn
-- `game/src/random.js` — seeded random (mulberry32)
+- `game/src/random.js` — the seeded random source (mulberry32)
 - `game/src/shots.js` — the four `?shot=` screenshot scenes
 
 ## License

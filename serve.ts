@@ -1,49 +1,54 @@
-// A tiny static server for game/ (Node 22, standard library only), so the
-// entry can be played locally without a build step: `node serve.ts` serves
-// game/ on http://localhost:8080. It sends the MIME types a browser game
-// needs, refuses any path outside game/, and otherwise does nothing
-// clever: this is a development convenience, not a web server for the
-// internet.
+// A tiny static server for game/ (Node 22, standard library only).
+//
+// Run it with `node serve.ts` and open http://localhost:8080: it serves
+// game/ with the MIME types a browser game needs, refuses any path
+// outside game/, and otherwise does nothing clever. This is a development
+// convenience, not a web server for the internet.
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/** The default port, when --port is absent or invalid. */
+const DEFAULT_PORT = 8080;
+
 const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
+
+/** MIME types for the extensions a browser game asks for. */
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json',
+  '.bin': 'application/octet-stream',
+  '.wasm': 'application/wasm',
+  '.wav': 'audio/wav',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.txt': 'text/plain; charset=utf-8',
+};
 
 /** The MIME type for a file, from its extension; unknown means bytes. */
 function mimeFor(path: string): string {
-  const types: Record<string, string> = {
-    '.html': 'text/html; charset=utf-8',
-    '.js': 'text/javascript; charset=utf-8',
-    '.mjs': 'text/javascript; charset=utf-8',
-    '.css': 'text/css; charset=utf-8',
-    '.json': 'application/json; charset=utf-8',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
-    '.svg': 'image/svg+xml',
-    '.ico': 'image/x-icon',
-    '.woff2': 'font/woff2',
-    '.glb': 'model/gltf-binary',
-    '.gltf': 'model/gltf+json',
-    '.bin': 'application/octet-stream',
-    '.wasm': 'application/wasm',
-    '.wav': 'audio/wav',
-    '.mp3': 'audio/mpeg',
-    '.ogg': 'audio/ogg',
-    '.txt': 'text/plain; charset=utf-8',
-  };
-  return types[extname(path).toLowerCase()] ?? 'application/octet-stream';
+  return MIME_TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream';
 }
 
-/** The port from `--port N`, or 8080 when absent or invalid. */
+/** The port from `--port N`, or the default when absent or invalid. */
 function parsePort(argv: string[]): number {
   const at = argv.indexOf('--port');
   const wanted = at === -1 ? NaN : Number(argv[at + 1]);
-  return Number.isInteger(wanted) && wanted > 0 && wanted < 65536 ? wanted : 8080;
+  return Number.isInteger(wanted) && wanted > 0 && wanted < 65536 ? wanted : DEFAULT_PORT;
 }
 
 /** Join a request path onto the root; null when it escapes game/. */

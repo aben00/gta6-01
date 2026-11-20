@@ -1,10 +1,11 @@
-// Sunset Heat — the renderer. Three.js draws the city (built once by
-// city.js), the cars, pedestrians, player, stash diamonds and the objective
-// beacon, and the DOM paints the HUD and the minimap on top. The camera is
-// a chase camera that orbits with the mouse and eases behind the car while
-// driving. Auto-quality watches the real frame time and steps the pixel
-// ratio down when the machine struggles, so software rendering stays
-// playable.
+// Sunset Heat — the renderer.
+//
+// Three.js draws the city (built once by city.js), the cars,
+// pedestrians, player, stash diamonds and the objective beacon, and the
+// DOM paints the HUD and the minimap on top. The camera is a chase camera
+// that orbits with the mouse and eases behind the car while driving.
+// Auto-quality watches the real frame time and steps the pixel ratio down
+// when the machine struggles, so software rendering stays playable.
 
 import * as THREE from 'three';
 import { COLORS, DRIVING, ISLAND, JOBS, QUALITY_RUNGS, QUALITY_WINDOW, STREETS } from './config.js';
@@ -119,7 +120,11 @@ function makeSkyBand() {
   return band;
 }
 
-/** The lights: sky bounce, the low sun, and a warm fill from the south. */
+/**
+ * The lights: sky bounce, the low sun, and a warm fill from the south.
+ * Lifted for the round-3 dossier reframe so subjects read at
+ * contact-sheet size: hemisphere 1.3, south fill 1.15.
+ */
 function addLights(scene) {
   scene.add(new THREE.HemisphereLight(COLORS.hemiSky, COLORS.hemiGround, 1.3));
   const sunLight = new THREE.DirectionalLight(COLORS.sunLight, 1.25);
@@ -154,7 +159,7 @@ function addSky(scene) {
  * create a group for each newcomer, update every live one, drop the
  * groups whose object left the list. `keyOf` picks the pool key.
  */
-function syncPool(pool, scene, items, keyOf, create, update) {
+function syncGroupPool(pool, scene, items, keyOf, create, update) {
   const seen = new Set();
   for (const item of items) {
     const key = keyOf(item);
@@ -431,6 +436,7 @@ export function createRenderer(canvas, layout, random) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'low-power' });
   if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
   if (THREE.ACESFilmicToneMapping !== undefined) renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  // Round-3 lighting lift: exposure 1.12, up from 1.05.
   renderer.toneMappingExposure = 1.12;
 
   const scene = new THREE.Scene();
@@ -531,7 +537,7 @@ export function createRenderer(canvas, layout, random) {
   }
 
   function syncCars(state, time) {
-    syncPool(carGroups, scene, state.cars, (car) => car.id, makeCarGroup, (group, car) => {
+    syncGroupPool(carGroups, scene, state.cars, (car) => car.id, makeCarGroup, (group, car) => {
       const body = group.userData.body;
       if (body.userData.color !== car.color) {
         body.geometry.dispose();
@@ -548,7 +554,7 @@ export function createRenderer(canvas, layout, random) {
   /** Pedestrians and officers share the walker pool. */
   function syncPeds(state) {
     const walkers = [...state.peds, ...state.officers];
-    syncPool(pedGroups, scene, walkers, (ped) => ped, (ped) => {
+    syncGroupPool(pedGroups, scene, walkers, (ped) => ped, (ped) => {
       const group = new THREE.Group();
       group.add(new THREE.Mesh(personGeometry(ped.shirt || 0x3a6fd2), personMaterial));
       return group;

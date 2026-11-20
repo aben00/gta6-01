@@ -7,12 +7,12 @@
 
 import { SCREEN_PLAY, SCREEN_TITLE } from './render.js';
 
-/** The nearest cruiser to the player, for exact placement in a frame. */
-function nearestCop(state) {
+/** The nearest car of `kind` to the player, or null. */
+function nearestOfKind(state, kind) {
   let best = null;
   let bestDist = Infinity;
   for (const car of state.cars) {
-    if (car.kind !== 'cop') continue;
+    if (car.kind !== kind) continue;
     const d = Math.hypot(car.x - state.player.x, car.z - state.player.z);
     if (d < bestDist) {
       best = car;
@@ -22,19 +22,35 @@ function nearestCop(state) {
   return best;
 }
 
-/** The nearest parked car to the player. */
-function nearestParked(state) {
-  let best = null;
-  let bestDist = Infinity;
-  for (const car of state.cars) {
-    if (car.kind !== 'parked') continue;
-    const d = Math.hypot(car.x - state.player.x, car.z - state.player.z);
-    if (d < bestDist) {
-      best = car;
-      bestDist = d;
-    }
+/** Park a car at a spot, still and facing `yaw`. */
+function parkAt(car, x, z, yaw) {
+  car.x = x;
+  car.z = z;
+  car.yaw = yaw;
+  car.speed = 0;
+}
+
+/** Spread every non-cop car over the side streets, clear of the frame. */
+function clearTraffic(state, spots) {
+  let lane = 0;
+  for (const other of state.cars) {
+    if (other.kind === 'cop') continue;
+    const spot = spots[lane % spots.length];
+    parkAt(other, spot[0], spot[1], 0);
+    lane += 1;
   }
-  return best;
+}
+
+/** Side-street parking spots for the cover's spare cars. */
+function coverParkSpots() {
+  const spots = [];
+  for (const z of [-180, -120, -60, 0, 60, 120, 180]) {
+    for (const x of [-120, 120]) spots.push([x, z]);
+  }
+  for (const z of [-180, -120, -60, 0]) {
+    for (const x of [-180, 180]) spots.push([x, z]);
+  }
+  return spots;
 }
 
 /** The cover: mission 2 at full speed, the red car running north up the
@@ -55,13 +71,7 @@ function stageCover(world, renderer) {
   car.speed = 30;
   // A taxi ahead in the lane and one car further on; the rest park on
   // the side streets, clear of the corridor.
-  const parkSpots = [];
-  for (const z of [-180, -120, -60, 0, 60, 120, 180]) {
-    for (const x of [-120, 120]) parkSpots.push([x, z]);
-  }
-  for (const z of [-180, -120, -60, 0]) {
-    for (const x of [-180, 180]) parkSpots.push([x, z]);
-  }
+  const spots = coverParkSpots();
   let placed = 0;
   let lane = 0;
   for (const other of state.cars) {
@@ -69,24 +79,15 @@ function stageCover(world, renderer) {
     if (placed === 0) {
       other.kind = 'taxi';
       other.color = 0xf2c230;
-      other.x = 0;
-      other.z = 78;
-      other.yaw = 0;
-      other.speed = 0;
+      parkAt(other, 0, 78, 0);
       placed += 1;
     } else if (placed === 1) {
       other.color = 0xe8e4da;
-      other.x = 3;
-      other.z = 96;
-      other.yaw = 0;
-      other.speed = 0;
+      parkAt(other, 3, 96, 0);
       placed += 1;
     } else {
-      const spot = parkSpots[lane % parkSpots.length];
-      other.x = spot[0];
-      other.z = spot[1];
-      other.yaw = 0;
-      other.speed = 0;
+      const spot = spots[lane % spots.length];
+      parkAt(other, spot[0], spot[1], 0);
       lane += 1;
     }
   }
@@ -95,6 +96,7 @@ function stageCover(world, renderer) {
   for (const ped of state.peds) {
     if (Math.abs(ped.x) < 8 && ped.z > 40 && ped.z < 120) ped.x = ped.x < 0 ? -14 : 14;
   }
+  // Low and close: 9 m behind the car, 3.2 m up, looking 22 m ahead.
   renderer.setShotCam([0, 3.2, 51], [0, 2, 82]);
   return { screen: SCREEN_PLAY };
 }
@@ -111,33 +113,21 @@ function stageChase(world, renderer) {
   world.debug.placePlayer(0, 0, Math.PI / 2);
   world.debug.spawnCops(2);
   const cops = state.cars.filter((car) => car.kind === 'cop');
-  if (cops[0]) {
-    cops[0].x = -8;
-    cops[0].z = 2;
-    cops[0].yaw = Math.PI / 2;
-    cops[0].speed = 0;
-  }
+  if (cops[0]) parkAt(cops[0], -8, 2, Math.PI / 2);
   if (cops[1]) {
     // Ahead-east, cutting the player off from the front: a pincer, not
     // two cruisers stacked on one bearing (v2 hid the second behind the
     // first).
-    cops[1].x = 6;
-    cops[1].z = 4;
-    cops[1].yaw = -Math.PI / 2;
-    cops[1].speed = 0;
+    parkAt(cops[1], 6, 4, -Math.PI / 2);
   }
   // Clear the corridor: random traffic in the frame would read as a
   // third, unexplained car (in v1 a red traffic car sat centre-left).
   // Park them spread over the south side streets, off-frame.
-  let lane = 0;
-  for (const other of state.cars) {
-    if (other.kind === 'cop') continue;
-    other.x = lane % 2 === 0 ? -120 : 120;
-    other.z = -180 + Math.floor(lane / 2) * 60;
-    other.yaw = 0;
-    other.speed = 0;
-    lane += 1;
+  const offFrame = [];
+  for (let lane = 0; lane < 14; lane += 1) {
+    offFrame.push([lane % 2 === 0 ? -120 : 120, -180 + Math.floor(lane / 2) * 60]);
   }
+  clearTraffic(state, offFrame);
   const ped = state.peds[0];
   if (ped) {
     ped.x = 7;
@@ -156,7 +146,7 @@ function stageMission(world, renderer) {
   state.missionStage = 1;
   state.objective = { x: -150, z: 150 };
   world.debug.placePlayer(0, 0, 0.35);
-  const parked = nearestParked(state);
+  const parked = nearestOfKind(state, 'parked');
   if (parked) {
     parked.x = 3.5;
     parked.z = 7;
@@ -180,13 +170,8 @@ function stageMission(world, renderer) {
     witness.yaw = 0.8;
   }
   world.debug.spawnCops(1);
-  const cop = nearestCop(state);
-  if (cop) {
-    cop.x = 10;
-    cop.z = 9;
-    cop.yaw = -0.6;
-    cop.speed = 0;
-  }
+  const cop = nearestOfKind(state, 'cop');
+  if (cop) parkAt(cop, 10, 9, -0.6);
   renderer.setShotCam([-5.5, 3.2, -6.5], [1.5, 1.0, 5.5]);
   return { screen: SCREEN_PLAY };
 }

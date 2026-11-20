@@ -1,7 +1,8 @@
-// Sunset Heat — boot and the one loop: input is read every frame, the
-// world advances in fixed 1/60 s steps (several in a slow frame, none in
-// a fast one), and the renderer paints what is there. Four screens: title,
-// play, paused and busted.
+// Sunset Heat — boot and the one loop.
+//
+// Every frame the loop reads input, advances the world in fixed 1/60 s
+// steps (several in a slow frame, none in a fast one), and paints what is
+// there. The game has four screens: title, play, paused and busted.
 //
 // ?seed=N fixes the city and the traffic. ?shot=cover|chase|mission|start
 // (with &seed=N) stages that scene instead of running the loop, paints it
@@ -26,6 +27,8 @@ import { createAudio } from './audio.js';
 const MAX_FRAME = 0.25;
 /** Seconds of no mouse input before the camera eases behind the car. */
 const CAM_FOLLOW_IDLE = 2.5;
+/** Idle movement the title screen steps with while it waits. */
+const TITLE_INPUT = { forward: 0, strafe: 0, run: false };
 
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
@@ -52,18 +55,10 @@ function announce(message) {
   status.textContent = message;
 }
 
-/** Screenshot mode: stage the scene, paint it twice, flag it ready. */
-function bootShot(name) {
-  const scene = stageShot(name, world, renderer);
-  let painted = 0;
-  function paint() {
-    // A fixed clock keeps the staged frame identical every run.
-    renderer.draw(world.state, scene.screen, STEP, 1.0);
-    painted += 1;
-    if (painted < 2) requestAnimationFrame(paint);
-    else window.__shotReady = true;
-  }
-  requestAnimationFrame(paint);
+/** Switch screens, announcing the new one. */
+function goToScreen(next, message) {
+  screen = next;
+  if (message) announce(message);
 }
 
 /** The playable game: the loop, the screens and the sounds. */
@@ -72,22 +67,77 @@ class SunsetGame {
     this.input = createInput(canvas);
     this.accumulator = 0;
     this.last = performance.now();
-    this.lastMouseAt = -99;
+    this.lastDragAt = -99;
     this.elapsed = 0;
     this.frame = this.frame.bind(this);
   }
 
-  start() {
-    screen = SCREEN_PLAY;
+  run() {
+    document.getElementById('start-button').addEventListener('click', () => {
+      audio.setMuted(audio.muted);
+      if (screen === SCREEN_TITLE) this.beginPlay();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && screen === SCREEN_PLAY) {
+        goToScreen(SCREEN_PAUSED, 'Paused.');
+      }
+    });
+    announce('Sunset Heat. Press Enter or START ENGINE to play.');
+    requestAnimationFrame(this.frame);
+  }
+
+  frame(now) {
+    requestAnimationFrame(this.frame);
+    const frameSeconds = Math.min((now - this.last) / 1000, MAX_FRAME);
+    this.last = now;
+    this.accumulator += frameSeconds;
+    this.elapsed += frameSeconds;
+    this.steerCamera(frameSeconds);
+    this.handlePresses();
+    this.advance();
+    audio.update(world.state);
+    renderer.draw(world.state, screen, STEP, this.elapsed);
+  }
+
+  /** Advance the world by the fixed steps this frame owes. */
+  advance() {
+    while (this.accumulator >= STEP) {
+      this.accumulator -= STEP;
+      if (screen === SCREEN_TITLE) {
+        world.step(STEP, TITLE_INPUT, { camYaw: 0 }, this.elapsed);
+      } else if (screen === SCREEN_PLAY) {
+        const events = world.step(STEP, this.input.moveInput(), { camYaw: renderer.camYaw }, this.elapsed);
+        this.routeEvents(events);
+      }
+    }
+  }
+
+  /** The camera: drag orbits it, and it follows the car when idle. */
+  steerCamera(frameSeconds) {
+    const look = this.input.takeLook();
+    if (look.x !== 0 || look.y !== 0) {
+      renderer.camYaw -= look.x * 0.0045;
+      this.lastDragAt = this.elapsed;
+      return;
+    }
+    if (world.state.player.onFoot) return;
+    if (this.elapsed - this.lastDragAt <= CAM_FOLLOW_IDLE) return;
+    // Hands off the mouse while driving: ease the camera behind the car.
+    let diff = world.state.player.yaw - renderer.camYaw;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    renderer.camYaw += diff * Math.min(1, frameSeconds * 1.4);
+  }
+
+  beginPlay() {
+    goToScreen(SCREEN_PLAY, 'Playing. Steal a car — walk up to one and press E.');
     this.input.clearPresses();
-    announce('Playing. Steal a car — walk up to one and press E.');
   }
 
   /** Turn a step's event flags into screens and sounds. */
   routeEvents(events) {
     if (events & EV_BUSTED) {
-      screen = SCREEN_BUSTED;
-      announce('Busted. Press Enter to wake up at the safehouse.');
+      goToScreen(SCREEN_BUSTED, 'Busted. Press Enter to wake up at the safehouse.');
     }
     if (events & EV_STASH) audio.chime();
     if (events & EV_MISSION) audio.chime();
@@ -102,30 +152,26 @@ class SunsetGame {
   /** The confirm key: title starts, busted respawns, paused resumes. */
   confirmPressed() {
     if (screen === SCREEN_TITLE) {
-      this.start();
+      this.beginPlay();
     } else if (screen === SCREEN_BUSTED) {
       world.respawn();
-      screen = SCREEN_PLAY;
-      announce('Back on the street. The safehouse again.');
+      goToScreen(SCREEN_PLAY, 'Back on the street. The safehouse again.');
     } else if (screen === SCREEN_PAUSED) {
-      screen = SCREEN_PLAY;
-      announce('Playing.');
+      goToScreen(SCREEN_PLAY, 'Playing.');
     }
   }
 
   /** The pause key: play pauses, paused resumes. */
   pausePressed() {
     if (screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
+      goToScreen(SCREEN_PAUSED, 'Paused.');
     } else if (screen === SCREEN_PAUSED) {
-      screen = SCREEN_PLAY;
-      announce('Playing.');
+      goToScreen(SCREEN_PLAY, 'Playing.');
     }
   }
 
   /** One-shot presses: menus first, then the in-play actions. */
-  routePresses() {
+  handlePresses() {
     if (this.input.takePress('mute')) {
       audio.setMuted(!audio.muted);
       return;
@@ -143,64 +189,20 @@ class SunsetGame {
     if (this.input.takePress('punch')) this.routeEvents(world.punch());
     if (this.input.takePress('horn')) this.routeEvents(world.horn());
   }
+}
 
-  /** The camera: drag orbits it, and it follows the car when idle. */
-  followCamera(frameSeconds) {
-    const look = this.input.takeLook();
-    if (look.x !== 0 || look.y !== 0) {
-      renderer.camYaw -= look.x * 0.0045;
-      this.lastMouseAt = this.elapsed;
-      return;
-    }
-    if (world.state.player.onFoot) return;
-    if (this.elapsed - this.lastMouseAt <= CAM_FOLLOW_IDLE) return;
-    // Hands off the mouse while driving: ease the camera behind the car.
-    let diff = world.state.player.yaw - renderer.camYaw;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    renderer.camYaw += diff * Math.min(1, frameSeconds * 1.4);
+/** Screenshot mode: stage the scene, paint it twice, flag it ready. */
+function bootShot(name) {
+  const scene = stageShot(name, world, renderer);
+  let painted = 0;
+  function paint() {
+    // A fixed clock keeps the staged frame identical every run.
+    renderer.draw(world.state, scene.screen, STEP, 1.0);
+    painted += 1;
+    if (painted < 2) requestAnimationFrame(paint);
+    else window.__shotReady = true;
   }
-
-  /** Advance the world by the fixed steps this frame owes. */
-  advance() {
-    while (this.accumulator >= STEP) {
-      this.accumulator -= STEP;
-      if (screen === SCREEN_TITLE) {
-        world.step(STEP, { forward: 0, strafe: 0, run: false }, { camYaw: 0 }, this.elapsed);
-      } else if (screen === SCREEN_PLAY) {
-        const events = world.step(STEP, this.input.moveInput(), { camYaw: renderer.camYaw }, this.elapsed);
-        this.routeEvents(events);
-      }
-    }
-  }
-
-  frame(now) {
-    requestAnimationFrame(this.frame);
-    const frameSeconds = Math.min((now - this.last) / 1000, MAX_FRAME);
-    this.last = now;
-    this.accumulator += frameSeconds;
-    this.elapsed += frameSeconds;
-    this.followCamera(frameSeconds);
-    this.routePresses();
-    this.advance();
-    audio.update(world.state);
-    renderer.draw(world.state, screen, STEP, this.elapsed);
-  }
-
-  run() {
-    document.getElementById('start-button').addEventListener('click', () => {
-      audio.setMuted(audio.muted);
-      if (screen === SCREEN_TITLE) this.start();
-    });
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden && screen === SCREEN_PLAY) {
-        screen = SCREEN_PAUSED;
-        announce('Paused.');
-      }
-    });
-    announce('Sunset Heat. Press Enter or START ENGINE to play.');
-    requestAnimationFrame(this.frame);
-  }
+  requestAnimationFrame(paint);
 }
 
 if (shot) bootShot(shot);

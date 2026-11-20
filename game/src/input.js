@@ -1,8 +1,10 @@
-// Keyboard and mouse input. Held keys give a movement vector each frame;
-// one-shot presses (enter a car, punch, honk, pause, mute, confirm) are
-// queued and taken exactly once by the loop, so a press between two frames
-// is never lost and never counted twice. Dragging the mouse orbits the
-// camera; a short click without a drag is a punch.
+// Keyboard and mouse input for Sunset Heat.
+//
+// Held keys give a movement vector each frame. One-shot presses — enter
+// a car, punch, honk, pause, mute, confirm — are queued and taken exactly
+// once by the loop, so a press that lands between two frames is never
+// lost and never counted twice. Dragging the mouse orbits the camera;
+// a short click without a drag is a punch.
 
 const MOVE_CODES = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD',
@@ -10,7 +12,7 @@ const MOVE_CODES = new Set([
 ]);
 const CONFIRM_CODES = new Set(['Enter', 'Space']);
 
-/** Which press a key code queues, if any. */
+/** Which one-shot press a key code queues, if any. */
 const PRESS_BY_CODE = {
   KeyE: 'interact',
   KeyF: 'punch',
@@ -20,6 +22,9 @@ const PRESS_BY_CODE = {
   KeyM: 'mute',
   Enter: 'confirm',
 };
+
+/** Pixels of pointer travel before a press stops being a click. */
+const DRAG_THRESHOLD = 6;
 
 /**
  * Reads the keyboard and the pointer, and hands the loop a movement
@@ -38,19 +43,8 @@ export class Input {
   }
 
   attach() {
-    window.addEventListener('keydown', (event) => {
-      if (MOVE_CODES.has(event.code) || CONFIRM_CODES.has(event.code)) event.preventDefault();
-      if (event.repeat) return;
-      const press = PRESS_BY_CODE[event.code];
-      if (press) this.queued.add(press);
-      if (event.code === 'Space' || MOVE_CODES.has(event.code)) this.held.add(event.code);
-      if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') this.held.add('Shift');
-    });
-    window.addEventListener('keyup', (event) => {
-      this.held.delete(event.code);
-      if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') this.held.delete('Shift');
-      if (event.code === 'Space') this.held.delete('Space');
-    });
+    window.addEventListener('keydown', (event) => this.onKeyDown(event));
+    window.addEventListener('keyup', (event) => this.onKeyUp(event));
     // A key released while the tab is hidden never sends keyup: let go.
     window.addEventListener('blur', () => this.held.clear());
 
@@ -58,19 +52,36 @@ export class Input {
       this.dragFrom = { x: event.clientX, y: event.clientY };
       this.dragged = false;
     });
-    window.addEventListener('pointermove', (event) => {
-      if (!this.dragFrom) return;
-      const dx = event.clientX - this.dragFrom.x;
-      const dy = event.clientY - this.dragFrom.y;
-      if (Math.abs(dx) + Math.abs(dy) > 6) this.dragged = true;
-      this.lookX += event.movementX || dx * 0.2;
-      this.lookY += event.movementY || dy * 0.2;
-      this.dragFrom = { x: event.clientX, y: event.clientY };
-    });
+    window.addEventListener('pointermove', (event) => this.onPointerMove(event));
     window.addEventListener('pointerup', () => {
       if (this.dragFrom && !this.dragged) this.queued.add('punch');
       this.dragFrom = null;
     });
+  }
+
+  onKeyDown(event) {
+    if (MOVE_CODES.has(event.code) || CONFIRM_CODES.has(event.code)) event.preventDefault();
+    if (event.repeat) return;
+    const press = PRESS_BY_CODE[event.code];
+    if (press) this.queued.add(press);
+    if (event.code === 'Space' || MOVE_CODES.has(event.code)) this.held.add(event.code);
+    if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') this.held.add('Shift');
+  }
+
+  onKeyUp(event) {
+    this.held.delete(event.code);
+    if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') this.held.delete('Shift');
+    if (event.code === 'Space') this.held.delete('Space');
+  }
+
+  onPointerMove(event) {
+    if (!this.dragFrom) return;
+    const dx = event.clientX - this.dragFrom.x;
+    const dy = event.clientY - this.dragFrom.y;
+    if (Math.abs(dx) + Math.abs(dy) > DRAG_THRESHOLD) this.dragged = true;
+    this.lookX += event.movementX || dx * 0.2;
+    this.lookY += event.movementY || dy * 0.2;
+    this.dragFrom = { x: event.clientX, y: event.clientY };
   }
 
   /** True while this key (a KeyboardEvent.code) is held down. */
